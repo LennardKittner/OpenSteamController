@@ -608,7 +608,7 @@ pub trait Device {
     fn get_charging_packet(&self) -> Option<Vec<u8>>;
     fn get_battery_packet(&self) -> Option<Vec<u8>>;
     fn get_wireless_connected_status_packet(&self) -> Option<Vec<u8>>;
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>>;
     fn get_device_state(&self) -> &DeviceState;
     fn get_device_state_mut(&mut self) -> &mut DeviceState;
     fn prepare_write(&mut self) {}

@@ -79,10 +79,10 @@ impl VirtualController {
 impl AbstractVirtualController for VirtualController {
     fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
         match input {
-            ControllerInput::LeftTrackpad(_, _, _) => {
+            ControllerInput::Wheel(_, _) => {
                 return Ok(());
             }
-            ControllerInput::RightTrackpad(_, _, _) => {
+            ControllerInput::Mouse(_, _) => {
                 return Ok(());
             }
             ControllerInput::RightJoyStick(x, y) => {

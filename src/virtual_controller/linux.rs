@@ -2,8 +2,8 @@ use std::ops::Neg;
 
 use crate::debug_println;
 use crate::virtual_controller::{AbstractVirtualController, ControllerInput};
-use uinput::event::{absolute, controller, relative};
-use uinput::event::Controller;
+use uinput::event::{Controller, Keyboard};
+use uinput::event::{absolute, controller, keyboard, relative};
 use uinput::{Device, Result};
 
 /// Xbox series x
@@ -68,12 +68,33 @@ fn map_digital_controller_input(
     })
 }
 
-fn map_digital_mouse_input(
-    input: ControllerInput,
-) -> Option<(uinput::event::Controller, bool)> {
+fn map_digital_mouse_input(input: ControllerInput) -> Option<(uinput::event::Controller, bool)> {
     Some(match input {
-        ControllerInput::RightTrackpadClick(pressed) => (Controller::Mouse(controller::Mouse::Left), pressed),
-        // ControllerInput::LeftTrackpadClick(pressed) => (Controller::Mouse(controller::Mouse::Middle), pressed),
+        ControllerInput::LeftMouse(pressed) => {
+            (Controller::Mouse(controller::Mouse::Left), pressed)
+        }
+        ControllerInput::MiddleMouse(pressed) => {
+            (Controller::Mouse(controller::Mouse::Middle), pressed)
+        }
+        ControllerInput::RightMouse(pressed) => {
+            (Controller::Mouse(controller::Mouse::Right), pressed)
+        }
+        _ => return None,
+    })
+}
+
+fn map_digital_keyboard_input(input: ControllerInput) -> Option<(uinput::event::Keyboard, bool)> {
+    Some(match input {
+        ControllerInput::EnterKey(pressed) => (Keyboard::Key(keyboard::Key::Enter), pressed),
+        ControllerInput::EscKey(pressed) => (Keyboard::Function(keyboard::Function::Esc), pressed),
+        ControllerInput::CtrlKey(pressed) => (Keyboard::Key(keyboard::Key::LeftControl), pressed),
+        ControllerInput::ShiftKey(pressed) => (Keyboard::Key(keyboard::Key::LeftShift), pressed),
+        ControllerInput::AltKey(pressed) => (Keyboard::Key(keyboard::Key::LeftAlt), pressed),
+        ControllerInput::MetaKey(pressed) => (Keyboard::Key(keyboard::Key::LeftMeta), pressed),
+        ControllerInput::UpKey(pressed) => (Keyboard::Key(keyboard::Key::Up), pressed),
+        ControllerInput::DownKey(pressed) => (Keyboard::Key(keyboard::Key::Down), pressed),
+        ControllerInput::LeftKey(pressed) => (Keyboard::Key(keyboard::Key::Left), pressed),
+        ControllerInput::RightKey(pressed) => (Keyboard::Key(keyboard::Key::Right), pressed),
         _ => return None,
     })
 }
@@ -82,8 +103,8 @@ fn map_digital_mouse_input(
 pub struct VirtualController {
     controller: Device,
     mouse: Device,
-    left_trackpad_prev: Option<(f32, f32, f32)>,
-    right_trackpad_prev: Option<(f32, f32, f32)>,
+    mouse_error: (f32, f32),
+    wheel_error: (f32, f32),
 }
 
 /// Stick all the way in one direction
@@ -92,9 +113,6 @@ const STICK_MIN: i32 = -32768;
 const STICK_MAX: i32 = 32767;
 /// Trigger pressed down
 const TRIGGER_MAX: i32 = 255;
-
-const MOUSE_SPEED: f32 = 256.0;
-const WHEEL_SPEED: f32 = -64.0;
 
 const HAT_NONE: i32 = 0;
 const HAT_LEFT: i32 = -1;
@@ -182,21 +200,31 @@ impl VirtualController {
             .create()?;
         let mouse = uinput::default()?
             .name(MOUSE_NAME)?
-            .event(uinput::event::Relative::Position(relative::Position::X))?
-            .event(uinput::event::Relative::Position(relative::Position::Y))?
             .event(uinput::event::Relative::Wheel(relative::Wheel::Horizontal))?
             .event(uinput::event::Relative::Wheel(relative::Wheel::Vertical))?
+            .event(uinput::event::Relative::Position(relative::Position::X))?
+            .event(uinput::event::Relative::Position(relative::Position::Y))?
             .event(uinput::event::Controller::Mouse(controller::Mouse::Left))?
             .event(uinput::event::Controller::Mouse(controller::Mouse::Middle))?
             .event(uinput::event::Controller::Mouse(controller::Mouse::Right))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::Enter))?
+            .event(uinput::event::Keyboard::Function(keyboard::Function::Esc))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::LeftControl))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::LeftShift))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::LeftAlt))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::LeftMeta))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::Up))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::Down))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::Left))?
+            .event(uinput::event::Keyboard::Key(keyboard::Key::Right))?
             .create()?;
-        let left_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let right_trackpad_prev: Option<(f32, f32, f32)> = None;
+        let mouse_error: (f32, f32) = (0.0, 0.0);
+        let wheel_error: (f32, f32) = (0.0, 0.0);
         Ok(Self {
             controller,
             mouse,
-            left_trackpad_prev,
-            right_trackpad_prev,
+            mouse_error,
+            wheel_error,
         })
     }
 
@@ -209,6 +237,12 @@ impl VirtualController {
                 self.controller.release(&input)?;
             }
         } else if let Some((input, pressed)) = map_digital_mouse_input(input) {
+            if pressed {
+                self.mouse.press(&input)?;
+            } else {
+                self.mouse.release(&input)?;
+            }
+        } else if let Some((input, pressed)) = map_digital_keyboard_input(input) {
             if pressed {
                 self.mouse.press(&input)?;
             } else {
@@ -253,55 +287,33 @@ impl AbstractVirtualController for VirtualController {
                 )?;
                 self.perform_digital_input(input)?;
             }
-            ControllerInput::LeftTrackpadTouch(_) => {
-                self.left_trackpad_prev = None;
+            ControllerInput::Wheel(x, y) => {
+                let x = x + self.wheel_error.0;
+                let x_out = x as i32;
+                self.wheel_error.0 = x - (x_out as f32);
+
+                let y = y + self.wheel_error.1;
+                let y_out = y as i32;
+                self.wheel_error.1 = y - (y_out as f32);
+
+                self.mouse
+                    .position(&uinput::event::relative::Wheel::Horizontal, x_out)?;
+                self.mouse
+                    .position(&uinput::event::relative::Wheel::Vertical, y_out)?;
             }
-            ControllerInput::RightTrackpadTouch(_) => {
-                self.right_trackpad_prev = None;
-            }
-            ControllerInput::LeftTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.left_trackpad_prev {
-                    let x_diff = x - prev_x;
-                    let y_diff = y - prev_y;
-                    let _z_diff = z - prev_z;
+            ControllerInput::Mouse(x, y) => {
+                let x = x + self.mouse_error.0;
+                let x_out = x as i32;
+                self.mouse_error.0 = x - (x_out as f32);
 
-                    let x_out = (x_diff * WHEEL_SPEED) as i32;
-                    let y_out = (y_diff * WHEEL_SPEED) as i32;
+                let y = y + self.mouse_error.1;
+                let y_out = y as i32;
+                self.mouse_error.1 = y - (y_out as f32);
 
-                    // Accumulate fractional output error
-                    let x_err = x_diff - (x_out as f32 / WHEEL_SPEED);
-                    let y_err = y_diff - (y_out as f32 / WHEEL_SPEED);
-                    self.left_trackpad_prev = Some((x - x_err, y - y_err, z));
-
-                    self.mouse.position(
-                        &uinput::event::relative::Wheel::Horizontal, x_out)?;
-                    self.mouse.position(
-                        &uinput::event::relative::Wheel::Vertical, y_out)?;
-                } else {
-                    self.left_trackpad_prev = Some((x, y, z));
-                }
-            }
-            ControllerInput::RightTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.right_trackpad_prev {
-                    let x_diff = x - prev_x;
-                    let y_diff = y - prev_y;
-                    let _z_diff = z - prev_z;
-
-                    let x_out = (x_diff * MOUSE_SPEED) as i32;
-                    let y_out = (y_diff * MOUSE_SPEED) as i32;
-
-                    // Accumulate fractional output error
-                    let x_err = x_diff - (x_out as f32 / MOUSE_SPEED);
-                    let y_err = y_diff - (y_out as f32 / MOUSE_SPEED);
-                    self.right_trackpad_prev = Some((x - x_err, y - y_err, z));
-
-                    self.mouse.position(
-                        &uinput::event::relative::Position::X, x_out)?;
-                    self.mouse.position(
-                        &uinput::event::relative::Position::Y, y_out.neg())?;
-                } else {
-                    self.right_trackpad_prev = Some((x, y, z));
-                }
+                self.mouse
+                    .position(&uinput::event::relative::Position::X, x_out)?;
+                self.mouse
+                    .position(&uinput::event::relative::Position::Y, y_out)?;
             }
             ControllerInput::RightJoyStick(x, y) => {
                 let y = y.neg();

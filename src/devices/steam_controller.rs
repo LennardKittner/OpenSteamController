@@ -35,8 +35,20 @@ const TRACKPAD_LOCATION: Range<usize> = 18..30;
 /// Max value of an analog input
 const ANALOG_MAX: f32 = 0b01111111_11111111 as f32;
 
+/// Trackpad as mouse speed multiplier
+const TRACKPAD_MOUSE_SPEED: f32 = 256.0;
+/// Trackpad as wheel speed multiplier
+const TRACKPAD_WHEEL_SPEED: f32 = -64.0;
+/// Joystick as mouse speed multiplier
+const STICK_MOUSE_SPEED: f32 = 8.0;
+/// Joystick as wheel speed multiplier
+const STICK_WHEEL_SPEED: f32 = 1.0;
+
 pub struct SteamController {
     state: DeviceState,
+    left_trackpad_prev: Option<(f32, f32, f32)>,
+    right_trackpad_prev: Option<(f32, f32, f32)>,
+    alt_mode: bool,
 }
 
 bitflags! {
@@ -84,7 +96,10 @@ impl SteamController {
 
     /// Initially disables the "lizard mode" and constructs the controller
     pub fn new_from_state(state: DeviceState) -> Self {
-        Self { state }
+        let left_trackpad_prev: Option<(f32, f32, f32)> = None;
+        let right_trackpad_prev: Option<(f32, f32, f32)> = None;
+        let alt_mode: bool = false;
+        Self { state, left_trackpad_prev, right_trackpad_prev, alt_mode }
     }
 
     /// Builds a packet based on a given command and a payload
@@ -106,6 +121,7 @@ impl SteamController {
     /// parse button combinations to generate special events
     /// TODO: maybe use a set instead of a vec for faster lookup
     fn parse_button_combinations(
+        &mut self,
         all_buttons: &[ControllerInput],
         changes: &[ControllerInput],
     ) -> Vec<DeviceEvent> {
@@ -134,7 +150,7 @@ impl SteamController {
     /// events of press or release button and updates the previous bitmap for comparison
     /// TODO: since we have an upper limit for the number of buttons it may be beneficial to use
     /// fixed size arrays instead of vectors here
-    fn handle_buttons(&self, response: [u8; 4]) -> Vec<DeviceEvent> {
+    fn handle_buttons(&mut self, response: [u8; 4]) -> Vec<DeviceEvent> {
         let button_bitmap = Button::from_bits_truncate(u32::from_le_bytes(response));
         let previous_bitmap = Button::from_bits_truncate(
             self.get_device_state()
@@ -144,11 +160,12 @@ impl SteamController {
         let changed_buttons = button_bitmap.symmetric_difference(previous_bitmap);
 
         if !changed_buttons.is_empty() {
-            let changed_buttons = Self::get_buttons(&changed_buttons, &button_bitmap);
+            let changed_buttons = self.get_buttons(&changed_buttons, &button_bitmap);
             let mut result = Self::wrap_controller_input_into_device_event(&changed_buttons);
             result.push(DeviceEvent::UpdateBitmap(button_bitmap.bits() as u64));
-            let mut events_from_combination = Self::parse_button_combinations(
-                &Self::get_buttons(&button_bitmap, &previous_bitmap),
+            let previous_changed_buttons = self.get_buttons(&button_bitmap, &previous_bitmap);
+            let mut events_from_combination = self.parse_button_combinations(
+                &previous_changed_buttons,
                 &changed_buttons,
             );
             result.append(&mut events_from_combination);
@@ -162,44 +179,98 @@ impl SteamController {
     /// Converts a bitmap of which buttons changed state and a bitmap of the current button states
     /// into a Vec of ControllerInput filled with digital ControllerInput, either pressed or
     /// released
-    fn get_buttons(changes: &Button, states: &Button) -> Vec<ControllerInput> {
+    fn get_buttons(&mut self, changes: &Button, states: &Button) -> Vec<ControllerInput> {
         changes
             .iter()
             .map(|button| {
                 // the `as u8 as f32` convert bools to 0.0 or 1.0
-                bitflags_match!(button, {
-                    Button::A =>                ControllerInput::A(states.contains(Button::A)),
-                    Button::B =>                ControllerInput::B(states.contains(Button::B)),
-                    Button::X =>                ControllerInput::X(states.contains(Button::X)),
-                    Button::Y =>                ControllerInput::Y(states.contains(Button::Y)),
-                    Button::Menu =>             ControllerInput::Menu(states.contains(Button::Menu)),
-                    Button::ThumbRight =>       ControllerInput::RightThumb(states.contains(Button::ThumbRight)),
-                    Button::Select =>           ControllerInput::Select(states.contains(Button::Select)),
-                    Button::R4 =>               ControllerInput::RightBumper(states.contains(Button::R4)), // TODO
-                    Button::R5 =>               ControllerInput::RightTrigger(states.contains(Button::R2) as u8 as f32), // TODO
-                    Button::R1 =>               ControllerInput::RightBumper(states.contains(Button::R1)),
-                    Button::DpadDown =>         ControllerInput::Down(states.contains(Button::DpadDown)),
-                    Button::DpadRight =>        ControllerInput::Right(states.contains(Button::DpadRight)),
-                    Button::DpadLeft =>         ControllerInput::Left(states.contains(Button::DpadLeft)),
-                    Button::DpadUp =>           ControllerInput::Up(states.contains(Button::DpadUp)),
-                    Button::Start =>            ControllerInput::Start(states.contains(Button::Start)),
-                    Button::ThumbLeft =>        ControllerInput::LeftThumb(states.contains(Button::ThumbLeft)),
-                    Button::Steam =>            ControllerInput::Home(states.contains(Button::Steam)),
-                    Button::L4 =>               ControllerInput::LeftBumper(states.contains(Button::L4)), // TODO
-                    Button::L5 =>               ControllerInput::LeftTrigger(states.contains(Button::L2) as u8 as f32), // TODO
-                    Button::L1 =>               ControllerInput::LeftBumper(states.contains(Button::L1)), // TODO
-                    Button::ThumbRightTouch =>  ControllerInput::Ignore, // TODO
-                    Button::PadRightTouch =>    ControllerInput::RightTrackpadTouch(states.contains(Button::PadRightTouch)), // TODO
-                    Button::PadRightClick =>    ControllerInput::RightTrackpadClick(states.contains(Button::PadRightClick)), // TODO
-                    Button::R2 =>               ControllerInput::RightTrigger(states.contains(Button::R2) as u8 as f32),
-                    Button::ThumbLeftTouch =>   ControllerInput::Ignore, //TODO
-                    Button::PadLeftTouch =>     ControllerInput::LeftTrackpadTouch(states.contains(Button::PadLeftTouch)), // TODO
-                    Button::PadLeftClick =>     ControllerInput::LeftTrackpadClick(states.contains(Button::PadLeftClick)), // TODO
-                    Button::L2 =>               ControllerInput::LeftTrigger(states.contains(Button::L2) as u8 as f32),
-                    Button::GripRight =>        ControllerInput::Ignore, // TODO
-                    Button::GripLeft =>         ControllerInput::Ignore,   // TODO
-                    _ => panic!("Undefined Button!"),
-                })
+                if self.alt_mode {
+                    bitflags_match!(button, {
+                        Button::A =>                ControllerInput::EnterKey(states.contains(Button::A)),
+                        Button::B =>                ControllerInput::EscKey(states.contains(Button::B)),
+                        Button::X =>                ControllerInput::Ignore, // TODO
+                        Button::Y =>                ControllerInput::Ignore, // TODO
+                        Button::ThumbRight =>       ControllerInput::MiddleMouse(states.contains(Button::ThumbRight)), // TODO
+                        Button::Select =>           ControllerInput::Ignore, // TODO
+                        Button::R4 =>               ControllerInput::Ignore, // TODO
+                        Button::R5 =>               ControllerInput::Ignore, // TODO
+                        Button::R1 =>               ControllerInput::Ignore, // TODO
+                        Button::DpadDown =>         ControllerInput::DownKey(states.contains(Button::DpadDown)),
+                        Button::DpadRight =>        ControllerInput::RightKey(states.contains(Button::DpadRight)),
+                        Button::DpadLeft =>         ControllerInput::LeftKey(states.contains(Button::DpadLeft)),
+                        Button::DpadUp =>           ControllerInput::UpKey(states.contains(Button::DpadUp)),
+                        Button::Start =>            ControllerInput::Ignore, // TODO
+                        Button::ThumbLeft =>        ControllerInput::Ignore, // TODO
+                        Button::Steam =>            ControllerInput::Ignore, // TODO
+                        Button::L4 =>               ControllerInput::Ignore, // TODO
+                        Button::L5 =>               ControllerInput::Ignore, // TODO
+                        Button::L1 =>               ControllerInput::Ignore, // TODO
+                        Button::ThumbRightTouch =>  ControllerInput::Ignore, // TODO
+                        Button::PadRightClick =>    ControllerInput::LeftMouse(states.contains(Button::PadRightClick)),
+                        Button::R2 =>               ControllerInput::LeftMouse(states.contains(Button::R2)),
+                        Button::ThumbLeftTouch =>   ControllerInput::Ignore, //TODO
+                        Button::PadLeftClick =>     ControllerInput::Ignore, // TODO
+                        Button::L2 =>               ControllerInput::RightMouse(states.contains(Button::L2)),
+                        Button::GripRight =>        ControllerInput::Ignore, // TODO
+                        Button::GripLeft =>         ControllerInput::Ignore,   // TODO
+                        Button::Menu => {
+                            self.alt_mode = states.contains(Button::Menu);
+                            ControllerInput::Ignore
+                        },
+                        Button::PadRightTouch => {
+                            self.right_trackpad_prev = None;
+                            ControllerInput::Ignore
+                        },
+                        Button::PadLeftTouch => {
+                            self.left_trackpad_prev = None;
+                            ControllerInput::Ignore
+                        },
+                        _ => panic!("Undefined Button!"),
+                    })
+                } else {
+                    bitflags_match!(button, {
+                        Button::A =>                ControllerInput::A(states.contains(Button::A)),
+                        Button::B =>                ControllerInput::B(states.contains(Button::B)),
+                        Button::X =>                ControllerInput::X(states.contains(Button::X)),
+                        Button::Y =>                ControllerInput::Y(states.contains(Button::Y)),
+                        Button::ThumbRight =>       ControllerInput::RightThumb(states.contains(Button::ThumbRight)),
+                        Button::Select =>           ControllerInput::Select(states.contains(Button::Select)),
+                        Button::R4 =>               ControllerInput::RightBumper(states.contains(Button::R4)), // TODO
+                        Button::R5 =>               ControllerInput::RightTrigger(states.contains(Button::R5) as u8 as f32), // TODO
+                        Button::R1 =>               ControllerInput::RightBumper(states.contains(Button::R1)),
+                        Button::DpadDown =>         ControllerInput::Down(states.contains(Button::DpadDown)),
+                        Button::DpadRight =>        ControllerInput::Right(states.contains(Button::DpadRight)),
+                        Button::DpadLeft =>         ControllerInput::Left(states.contains(Button::DpadLeft)),
+                        Button::DpadUp =>           ControllerInput::Up(states.contains(Button::DpadUp)),
+                        Button::Start =>            ControllerInput::Start(states.contains(Button::Start)),
+                        Button::ThumbLeft =>        ControllerInput::LeftThumb(states.contains(Button::ThumbLeft)),
+                        Button::Steam =>            ControllerInput::Home(states.contains(Button::Steam)),
+                        Button::L4 =>               ControllerInput::LeftBumper(states.contains(Button::L4)), // TODO
+                        Button::L5 =>               ControllerInput::LeftTrigger(states.contains(Button::L5) as u8 as f32), // TODO
+                        Button::L1 =>               ControllerInput::LeftBumper(states.contains(Button::L1)), // TODO
+                        Button::ThumbRightTouch =>  ControllerInput::Ignore, // TODO
+                        Button::PadRightClick =>    ControllerInput::LeftMouse(states.contains(Button::PadRightClick)), // TODO
+                        Button::R2 =>               ControllerInput::RightTriggerClick(states.contains(Button::R2)),
+                        Button::ThumbLeftTouch =>   ControllerInput::Ignore, //TODO
+                        Button::PadLeftClick =>     ControllerInput::Ignore, // TODO
+                        Button::L2 =>               ControllerInput::LeftTriggerClick(states.contains(Button::L2)),
+                        Button::GripRight =>        ControllerInput::Ignore, // TODO
+                        Button::GripLeft =>         ControllerInput::Ignore,   // TODO
+                        Button::Menu => {
+                            self.alt_mode = states.contains(Button::Menu);
+                            ControllerInput::Ignore
+                        },
+                        Button::PadRightTouch => {
+                            self.right_trackpad_prev = None;
+                            ControllerInput::Ignore
+                        },
+                        Button::PadLeftTouch => {
+                            self.left_trackpad_prev = None;
+                            ControllerInput::Ignore
+                        },
+                        _ => panic!("Undefined Button!"),
+                    })
+                }
             })
             .collect::<Vec<ControllerInput>>()
     }
@@ -226,35 +297,74 @@ impl SteamController {
     }
 
     /// Converts four bytes of data into controller input events for the left and right trigger
-    fn handle_triggers(response: [u8; 4]) -> Vec<DeviceEvent> {
+    fn handle_triggers(&self, response: [u8; 4]) -> Vec<DeviceEvent> {
         let left = Self::convert_analog(response[0..2].try_into().unwrap());
         let right = Self::convert_analog(response[2..4].try_into().unwrap());
-        Self::wrap_controller_input_into_device_event(&[
-            ControllerInput::LeftTrigger(left),
-            ControllerInput::RightTrigger(right),
-        ])
+        if self.alt_mode {
+            vec![]
+        } else {
+            Self::wrap_controller_input_into_device_event(&[
+                ControllerInput::LeftTrigger(left),
+                ControllerInput::RightTrigger(right),
+            ])
+        }
     }
 
     /// Converts four bytes of data into controller input events for the left and right joystick
-    fn handle_joysticks(response: [u8; 8]) -> Vec<DeviceEvent> {
+    fn handle_joysticks(&self, response: [u8; 8]) -> Vec<DeviceEvent> {
         let (left_x, left_y) = Self::convert_analog_2d(response[0..4].try_into().unwrap());
         let (right_x, right_y) = Self::convert_analog_2d(response[4..8].try_into().unwrap());
-        Self::wrap_controller_input_into_device_event(&[
-            ControllerInput::LeftJoyStick(left_x, left_y),
-            ControllerInput::RightJoyStick(right_x, right_y),
-        ])
+        if self.alt_mode {
+            let mut events = vec![];
+            // TODO: Check if the sticks are even being touched
+            if ((left_x * left_x) + (left_y * left_y)) > 0.05 {
+                events.push(ControllerInput::Wheel(left_x * STICK_WHEEL_SPEED, left_y * STICK_WHEEL_SPEED));
+            }
+            if ((right_x * right_x) + (right_y * right_y)) > 0.05 {
+                events.push(ControllerInput::Mouse(right_x * STICK_MOUSE_SPEED, -right_y * STICK_MOUSE_SPEED));
+            }
+            Self::wrap_controller_input_into_device_event(&events[..])
+        } else {
+            Self::wrap_controller_input_into_device_event(&[
+                ControllerInput::LeftJoyStick(left_x, left_y),
+                ControllerInput::RightJoyStick(right_x, right_y),
+            ])
+        }
     }
 
     /// Converts four bytes of data into controller input events for the left and right trackpad
-    fn handle_trackpads(response: [u8; 12]) -> Vec<DeviceEvent> {
+    fn handle_trackpads(&mut self, response: [u8; 12]) -> Vec<DeviceEvent> {
         let (left_x, left_y, left_force) =
             Self::convert_analog_3d(response[0..6].try_into().unwrap());
         let (right_x, right_y, right_force) =
             Self::convert_analog_3d(response[6..12].try_into().unwrap());
-        Self::wrap_controller_input_into_device_event(&[
-            ControllerInput::LeftTrackpad(left_x, left_y, left_force),
-            ControllerInput::RightTrackpad(right_x, right_y, right_force),
-        ])
+        let mut events = vec![];
+
+        if let Some((prev_x, prev_y, prev_force)) = self.left_trackpad_prev {
+            let x_diff = left_x - prev_x;
+            let y_diff = left_y - prev_y;
+            let _force_diff = left_force - prev_force;
+
+            self.left_trackpad_prev = Some((left_x, left_y, left_force));
+
+            events.push(ControllerInput::Wheel(x_diff * TRACKPAD_WHEEL_SPEED, y_diff * TRACKPAD_WHEEL_SPEED));
+        } else {
+            self.left_trackpad_prev = Some((left_x, left_y, left_force));
+        }
+
+        if let Some((prev_x, prev_y, prev_force)) = self.right_trackpad_prev {
+            let x_diff = right_x - prev_x;
+            let y_diff = right_y - prev_y;
+            let _force_diff = right_force - prev_force;
+
+            self.right_trackpad_prev = Some((right_x, right_y, right_force));
+
+            events.push(ControllerInput::Mouse(x_diff * TRACKPAD_MOUSE_SPEED, -y_diff * TRACKPAD_MOUSE_SPEED));
+        } else {
+            self.right_trackpad_prev = Some((right_x, right_y, right_force));
+        }
+
+        Self::wrap_controller_input_into_device_event(&events[..])
     }
 
     fn handle_status(response: &[u8; 16]) -> Vec<DeviceEvent> {
@@ -317,7 +427,7 @@ impl Device for SteamController {
         None
     }
 
-    fn get_event_from_device_response(&self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
+    fn get_event_from_device_response(&mut self, response: &[u8]) -> Option<Vec<DeviceEvent>> {
         let mut events = vec![];
         match response[0] {
             RESPONSE_STATUS_EVENT => {
@@ -329,17 +439,17 @@ impl Device for SteamController {
                 events.append(
                     &mut self.handle_buttons(response[BUTTON_LOCATION].try_into().unwrap()),
                 );
-                events.append(&mut SteamController::handle_triggers(
+                events.append(&mut self.handle_triggers(
                     // 34-35 rotate left down
                     // 36-37 rotate bottom down
                     // 42-43 rotate right down
                     // 44-45 rotate left
                     response[TRIGGER_LOCATION].try_into().unwrap(),
                 ));
-                events.append(&mut SteamController::handle_joysticks(
+                events.append(&mut self.handle_joysticks(
                     response[JOYSTICK_LOCATION].try_into().unwrap(),
                 ));
-                events.append(&mut SteamController::handle_trackpads(
+                events.append(&mut self.handle_trackpads(
                     response[TRACKPAD_LOCATION].try_into().unwrap(),
                 ));
             }
