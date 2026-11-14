@@ -61,7 +61,9 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
 
 impl VirtualController {
     /// create new virtual controller
-    pub fn new() -> Result<VirtualController, Error> {
+    /// The Windows backend always uses XInput, so the parameter is ignored.
+    /// It is kept to maintain the same interface as the Linux backend.
+    pub fn new(_xinput: bool) -> Result<VirtualController, Error> {
         let client = vigem_client::Client::connect().unwrap();
         let id = vigem_client::TargetId::XBOX360_WIRED;
         let mut device = vigem_client::Xbox360Wired::new(client, id);

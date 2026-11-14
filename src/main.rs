@@ -46,7 +46,7 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .disable_version_flag(false)
         .author(env!("CARGO_PKG_AUTHORS"))
-        .about("A tray application for monitoring the new Steam Controller")
+        .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(
             Arg::new("verbose")
                 .long("verbose")
@@ -85,7 +85,8 @@ fn main() {
                     let local_exit = exit.clone();
                     (
                         std::thread::spawn(move || {
-                            controller_handler(device, device_rx, local_exit);
+                            // Windows always uses xinput mode
+                            controller_handler(true, device, device_rx, local_exit);
                         }),
                         device_tx,
                     )
@@ -141,6 +142,7 @@ fn main() {
 /// handles packets from a controller and is responsible for generating virtual controller inputs
 /// the exit atomic is used for termination
 fn controller_handler(
+    xinput_mode: bool,
     mut device: Controller,
     mut device_rx: ControllerReceiver,
     exit: Arc<AtomicBool>,
@@ -164,7 +166,7 @@ fn controller_handler(
                 } else if device.device_properties().connected == Some(true)
                     && virt_controller.is_none()
                 {
-                    match VirtualController::new() {
+                    match VirtualController::new(xinput_mode) {
                         Ok(vc) => virt_controller = Some(vc),
                         Err(e) => eprintln!("Failed to create virtual controller {e}"),
                     }
@@ -227,7 +229,7 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .disable_version_flag(false)
         .author(env!("CARGO_PKG_AUTHORS"))
-        .about("A tray application for monitoring the new Steam Controller.")
+        .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(
             Arg::new("verbose")
                 .long("verbose")
@@ -243,9 +245,18 @@ fn main() {
                 .required(false)
                 .help("Use the symbolic (monochrome) variants of the system tray icons"),
         )
+        .arg(
+            Arg::new("xinput_mode")
+                .long("xinput-mode")
+                .short('x')
+                .action(ArgAction::SetTrue)
+                .required(false)
+                .help("Enable xinput mode, which reduces the number of virtual buttons"),
+        )
         .get_matches();
 
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
+    let xinput_mode = matches.get_flag("xinput_mode");
     let monochrome_icons = matches.get_flag("monochrome_icons");
 
     let (tx, rx) = mpsc::channel();
@@ -273,7 +284,7 @@ fn main() {
                 let local_exit = exit.clone();
                 (
                     std::thread::spawn(move || {
-                        controller_handler(device, device_rx, local_exit);
+                        controller_handler(xinput_mode, device, device_rx, local_exit);
                     }),
                     device_tx,
                 )

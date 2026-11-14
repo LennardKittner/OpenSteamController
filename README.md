@@ -56,6 +56,20 @@ This project is not affiliated with, endorsed by, or associated with Valve in an
 
 ## Usage
 
+```
+open-steam-controller --help
+A tray application providing extended support for the Steam Controller (2026) without Steam.
+
+Usage: open-steam-controller [OPTIONS]
+
+Options:
+  -v, --verbose           Use verbose output
+      --monochrome-icons  Use the symbolic (monochrome) variants of the system tray icons
+  -x, --xinput-mode       Enable xinput mode, which reduces the number of virtual buttons
+  -h, --help              Print help
+  -V, --version           Print version
+```
+
 ### 1. Requirements
 
 #### 1.1 Linux
