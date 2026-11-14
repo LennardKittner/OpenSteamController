@@ -3,7 +3,7 @@ name = "open-steam-controller"
 version = "1.2.0"
 edition = "2021"
 authors = ["Lennard Kittner"]
-description = "A CLI and tray application for monitoring and managing the new Steam Controller."
+description = "A tray application providing extended support for the Steam Controller (2026) without Steam."
 
 [dependencies]
 anyhow = "1.0.102"

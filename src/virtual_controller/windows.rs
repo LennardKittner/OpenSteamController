@@ -61,7 +61,7 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
 
 impl VirtualController {
     /// create new virtual controller
-    pub fn new() -> Result<VirtualController, Error> {
+    pub fn new(_xinput: bool) -> Result<VirtualController, Error> {
         let client = vigem_client::Client::connect().unwrap();
         let id = vigem_client::TargetId::XBOX360_WIRED;
         let mut device = vigem_client::Xbox360Wired::new(client, id);

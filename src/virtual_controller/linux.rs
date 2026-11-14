@@ -22,48 +22,65 @@ const MOUSE_NAME: &str = "Steam Controller virtual mouse";
 ///
 /// Panics if the input is analog
 fn map_digital_controller_input(
+    xinput_mode: bool,
     input: ControllerInput,
 ) -> Option<(uinput::event::Controller, bool)> {
-    Some(match input {
-        ControllerInput::South(pressed) => {
+    Some(match (xinput_mode, input) {
+        (false, ControllerInput::South(pressed)) => {
             (Controller::GamePad(controller::GamePad::South), pressed)
         }
-        ControllerInput::A(pressed) => (Controller::GamePad(controller::GamePad::A), pressed),
-        ControllerInput::East(pressed) => (Controller::GamePad(controller::GamePad::East), pressed),
-        ControllerInput::B(pressed) => (Controller::GamePad(controller::GamePad::B), pressed),
-        ControllerInput::C(pressed) => (Controller::GamePad(controller::GamePad::C), pressed),
-        ControllerInput::North(pressed) => {
+        (_, ControllerInput::A(pressed)) => (Controller::GamePad(controller::GamePad::A), pressed),
+        (false, ControllerInput::East(pressed)) => {
+            (Controller::GamePad(controller::GamePad::East), pressed)
+        }
+        (_, ControllerInput::B(pressed)) => (Controller::GamePad(controller::GamePad::B), pressed),
+        (_, ControllerInput::C(pressed)) => (Controller::GamePad(controller::GamePad::C), pressed),
+        (false, ControllerInput::North(pressed)) => {
             (Controller::GamePad(controller::GamePad::North), pressed)
         }
-        ControllerInput::X(pressed) => (Controller::GamePad(controller::GamePad::X), pressed),
-        ControllerInput::West(pressed) => (Controller::GamePad(controller::GamePad::West), pressed),
-        ControllerInput::Y(pressed) => (Controller::GamePad(controller::GamePad::Y), pressed),
-        ControllerInput::Z(pressed) => (Controller::GamePad(controller::GamePad::Z), pressed),
-        ControllerInput::LeftBumper(pressed) => {
+        (_, ControllerInput::X(pressed)) => (Controller::GamePad(controller::GamePad::X), pressed),
+        (false, ControllerInput::West(pressed)) => {
+            (Controller::GamePad(controller::GamePad::West), pressed)
+        }
+        (_, ControllerInput::Y(pressed)) => (Controller::GamePad(controller::GamePad::Y), pressed),
+        (_, ControllerInput::Z(pressed)) => (Controller::GamePad(controller::GamePad::Z), pressed),
+        (_, ControllerInput::LeftBumper(pressed)) => {
             (Controller::GamePad(controller::GamePad::TL), pressed)
         }
-        ControllerInput::RightBumper(pressed) => {
+        (_, ControllerInput::RightBumper(pressed)) => {
             (Controller::GamePad(controller::GamePad::TR), pressed)
         }
-        ControllerInput::Select(pressed) => {
+        (_, ControllerInput::Select(pressed)) => {
             (Controller::GamePad(controller::GamePad::Select), pressed)
         }
-        ControllerInput::Start(pressed) => {
+        (_, ControllerInput::Start(pressed)) => {
             (Controller::GamePad(controller::GamePad::Start), pressed)
         }
-        ControllerInput::Mode(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
-        ControllerInput::LeftThumb(pressed) => {
+        (false, ControllerInput::Mode(pressed)) => {
+            (Controller::GamePad(controller::GamePad::Mode), pressed)
+        }
+        (_, ControllerInput::LeftThumb(pressed)) => {
             (Controller::GamePad(controller::GamePad::ThumbL), pressed)
         }
-        ControllerInput::RightThumb(pressed) => {
+        (_, ControllerInput::RightThumb(pressed)) => {
             (Controller::GamePad(controller::GamePad::ThumbR), pressed)
         }
-        ControllerInput::Menu(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
-        ControllerInput::Home(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
-        ControllerInput::Up(pressed) => (Controller::DPad(controller::DPad::Up), pressed),
-        ControllerInput::Down(pressed) => (Controller::DPad(controller::DPad::Down), pressed),
-        ControllerInput::Left(pressed) => (Controller::DPad(controller::DPad::Left), pressed),
-        ControllerInput::Right(pressed) => (Controller::DPad(controller::DPad::Right), pressed),
+        (false, ControllerInput::Menu(pressed)) => {
+            (Controller::GamePad(controller::GamePad::Mode), pressed)
+        }
+        (false, ControllerInput::Home(pressed)) => {
+            (Controller::GamePad(controller::GamePad::Mode), pressed)
+        }
+        (false, ControllerInput::Up(pressed)) => (Controller::DPad(controller::DPad::Up), pressed),
+        (false, ControllerInput::Down(pressed)) => {
+            (Controller::DPad(controller::DPad::Down), pressed)
+        }
+        (false, ControllerInput::Left(pressed)) => {
+            (Controller::DPad(controller::DPad::Left), pressed)
+        }
+        (false, ControllerInput::Right(pressed)) => {
+            (Controller::DPad(controller::DPad::Right), pressed)
+        }
         _ => return None,
     })
 }
@@ -80,6 +97,7 @@ fn map_digital_mouse_input(input: ControllerInput) -> Option<(uinput::event::Con
 
 /// A virtual controller to send button inputs
 pub struct VirtualController {
+    xinput_mode: bool,
     controller: Device,
     mouse: Device,
     left_trackpad_prev: Option<(f32, f32, f32)>,
@@ -104,8 +122,8 @@ const HAT_DOWN: i32 = 1;
 
 impl VirtualController {
     /// create new virtual controller
-    pub fn new() -> Result<VirtualController> {
-        let controller = uinput::default()?
+    pub fn new(xinput_mode: bool) -> Result<VirtualController> {
+        let mut controller = uinput::default()?
             .name(NAME)?
             .vendor(VENDOR_ID)
             .product(PRODUCT_ID)
@@ -115,15 +133,6 @@ impl VirtualController {
             .event(uinput::event::Controller::GamePad(controller::GamePad::Y))?
             .event(uinput::event::Controller::GamePad(controller::GamePad::TL))?
             .event(uinput::event::Controller::GamePad(controller::GamePad::TR))?
-            .event(uinput::event::Controller::GamePad(controller::GamePad::TR2))?
-            .event(uinput::event::Controller::GamePad(controller::GamePad::TL2))?
-            .event(uinput::event::Controller::GamePad(
-                controller::GamePad::Mode,
-            ))?
-            .event(uinput::event::Controller::DPad(controller::DPad::Up))?
-            .event(uinput::event::Controller::DPad(controller::DPad::Down))?
-            .event(uinput::event::Controller::DPad(controller::DPad::Left))?
-            .event(uinput::event::Controller::DPad(controller::DPad::Right))?
             .event(uinput::event::Absolute::Hat(absolute::Hat::X0))?
             .min(HAT_LEFT)
             .max(HAT_RIGHT)
@@ -178,8 +187,20 @@ impl VirtualController {
             .min(0)
             .max(TRIGGER_MAX)
             .fuzz(0)
-            .flat(0)
-            .create()?;
+            .flat(0);
+        if !xinput_mode {
+            controller = controller
+                .event(uinput::event::Controller::GamePad(controller::GamePad::TR2))?
+                .event(uinput::event::Controller::GamePad(controller::GamePad::TL2))?
+                .event(uinput::event::Controller::GamePad(
+                    controller::GamePad::Mode,
+                ))?
+                .event(uinput::event::Controller::DPad(controller::DPad::Up))?
+                .event(uinput::event::Controller::DPad(controller::DPad::Down))?
+                .event(uinput::event::Controller::DPad(controller::DPad::Left))?
+                .event(uinput::event::Controller::DPad(controller::DPad::Right))?;
+        }
+        let controller = controller.create()?;
         let mouse = uinput::default()?
             .name(MOUSE_NAME)?
             .event(uinput::event::Relative::Position(relative::Position::X))?
@@ -193,6 +214,7 @@ impl VirtualController {
         let left_trackpad_prev: Option<(f32, f32, f32)> = None;
         let right_trackpad_prev: Option<(f32, f32, f32)> = None;
         Ok(Self {
+            xinput_mode,
             controller,
             mouse,
             left_trackpad_prev,
@@ -202,7 +224,7 @@ impl VirtualController {
 
     /// helper for digital inputs
     fn perform_digital_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
-        if let Some((input, pressed)) = map_digital_controller_input(input) {
+        if let Some((input, pressed)) = map_digital_controller_input(self.xinput_mode, input) {
             if pressed {
                 self.controller.press(&input)?;
             } else {
@@ -230,28 +252,36 @@ impl AbstractVirtualController for VirtualController {
                     &uinput::event::absolute::Hat::X0,
                     if pressed { HAT_LEFT } else { HAT_NONE },
                 )?;
-                self.perform_digital_input(input)?;
+                if !self.xinput_mode {
+                    self.perform_digital_input(input)?;
+                }
             }
             ControllerInput::Right(pressed) => {
                 self.controller.position(
                     &uinput::event::absolute::Hat::X0,
                     if pressed { HAT_RIGHT } else { HAT_NONE },
                 )?;
-                self.perform_digital_input(input)?;
+                if !self.xinput_mode {
+                    self.perform_digital_input(input)?;
+                }
             }
             ControllerInput::Up(pressed) => {
                 self.controller.position(
                     &uinput::event::absolute::Hat::Y0,
                     if pressed { HAT_UP } else { HAT_NONE },
                 )?;
-                self.perform_digital_input(input)?;
+                if !self.xinput_mode {
+                    self.perform_digital_input(input)?;
+                }
             }
             ControllerInput::Down(pressed) => {
                 self.controller.position(
                     &uinput::event::absolute::Hat::Y0,
                     if pressed { HAT_DOWN } else { HAT_NONE },
                 )?;
-                self.perform_digital_input(input)?;
+                if !self.xinput_mode {
+                    self.perform_digital_input(input)?;
+                }
             }
             ControllerInput::LeftTrackpadTouch(_) => {
                 self.left_trackpad_prev = None;
