@@ -8,6 +8,8 @@ use uinput::{Device, Result};
 
 /// Xbox series x
 const PRODUCT_ID: u16 = 0x0b12;
+/// Xbox 360
+const PRODUCT_ID_XINPUT: u16 = 0x028e;
 /// Microsoft
 const VENDOR_ID: u16 = 0x045e;
 /// Name of the controller
@@ -126,7 +128,11 @@ impl VirtualController {
         let mut controller = uinput::default()?
             .name(NAME)?
             .vendor(VENDOR_ID)
-            .product(PRODUCT_ID)
+            .product(if xinput_mode {
+                PRODUCT_ID_XINPUT
+            } else {
+                PRODUCT_ID
+            })
             .event(uinput::event::Controller::GamePad(controller::GamePad::A))?
             .event(uinput::event::Controller::GamePad(controller::GamePad::B))?
             .event(uinput::event::Controller::GamePad(controller::GamePad::X))?
