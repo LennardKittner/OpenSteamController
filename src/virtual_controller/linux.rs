@@ -28,24 +28,24 @@ fn map_digital_controller_input(
     input: ControllerInput,
 ) -> Option<(uinput::event::Controller, bool)> {
     Some(match (xinput_mode, input) {
-        (false, ControllerInput::South(pressed)) => {
+        (_, ControllerInput::A(pressed)) => {
             (Controller::GamePad(controller::GamePad::South), pressed)
         }
-        (_, ControllerInput::A(pressed)) => (Controller::GamePad(controller::GamePad::A), pressed),
-        (false, ControllerInput::East(pressed)) => {
+        (_, ControllerInput::B(pressed)) => {
             (Controller::GamePad(controller::GamePad::East), pressed)
         }
-        (_, ControllerInput::B(pressed)) => (Controller::GamePad(controller::GamePad::B), pressed),
-        (_, ControllerInput::C(pressed)) => (Controller::GamePad(controller::GamePad::C), pressed),
-        (false, ControllerInput::North(pressed)) => {
-            (Controller::GamePad(controller::GamePad::North), pressed)
+        (false, ControllerInput::C(pressed)) => {
+            (Controller::GamePad(controller::GamePad::C), pressed)
         }
-        (_, ControllerInput::X(pressed)) => (Controller::GamePad(controller::GamePad::X), pressed),
-        (false, ControllerInput::West(pressed)) => {
+        (_, ControllerInput::X(pressed)) => {
             (Controller::GamePad(controller::GamePad::West), pressed)
         }
-        (_, ControllerInput::Y(pressed)) => (Controller::GamePad(controller::GamePad::Y), pressed),
-        (_, ControllerInput::Z(pressed)) => (Controller::GamePad(controller::GamePad::Z), pressed),
+        (_, ControllerInput::Y(pressed)) => {
+            (Controller::GamePad(controller::GamePad::North), pressed)
+        }
+        (false, ControllerInput::Z(pressed)) => {
+            (Controller::GamePad(controller::GamePad::Z), pressed)
+        }
         (_, ControllerInput::LeftBumper(pressed)) => {
             (Controller::GamePad(controller::GamePad::TL), pressed)
         }
