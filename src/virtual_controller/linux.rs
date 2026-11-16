@@ -34,8 +34,21 @@ fn map_digital_controller_input(
         (_, ControllerInput::A(pressed)) => (KeyCode::BTN_SOUTH, pressed),
         (_, ControllerInput::B(pressed)) => (KeyCode::BTN_EAST, pressed),
         (false, ControllerInput::C(pressed)) => (KeyCode::BTN_C, pressed),
-        (_, ControllerInput::X(pressed)) => (KeyCode::BTN_WEST, pressed),
-        (_, ControllerInput::Y(pressed)) => (KeyCode::BTN_NORTH, pressed),
+        // Mapping bug: the Linux kernel defines BTN_A/B/X/Y as aliases for
+        // BTN_SOUTH/EAST/NORTH/WEST:
+        //  X
+        // Y B
+        //  A
+        // However, this is *not* the same as the Xbox layout:
+        //  Y
+        // X B
+        //  A
+        // Despite this, it would seem most default mappings assume the
+        // Xbox layout *is* the same as the Linux layout, meaning we need to
+        // deliberately reverse X and Y for as long as we pretend to be an
+        // Xbox controller.
+        (_, ControllerInput::X(pressed)) => (KeyCode::BTN_NORTH, pressed),
+        (_, ControllerInput::Y(pressed)) => (KeyCode::BTN_WEST, pressed),
         (false, ControllerInput::Z(pressed)) => (KeyCode::BTN_Z, pressed),
         (_, ControllerInput::LeftBumper(pressed)) => (KeyCode::BTN_TL, pressed),
         (_, ControllerInput::RightBumper(pressed)) => (KeyCode::BTN_TR, pressed),
