@@ -2,7 +2,8 @@ use std::io;
 use std::ops::Neg;
 
 use crate::debug_println;
-use crate::virtual_controller::{AbstractVirtualController, ControllerInput};
+use crate::devices::{HapticEvent, HapticSide};
+use crate::virtual_controller::{AbstractVirtualController, ControllerInput, ControllerOutput};
 use evdev::uinput::VirtualDevice;
 use evdev::{
     AbsInfo, AbsoluteAxisCode, AttributeSet, BusType, EventType, InputEvent, InputId, KeyCode,
@@ -67,12 +68,12 @@ fn map_digital_controller_input(
     })
 }
 
-fn map_digital_mouse_input(input: ControllerInput) -> Option<(KeyCode, bool)> {
-    Some(match input {
-        ControllerInput::RightTrackpadClick(pressed) => (KeyCode::BTN_LEFT, pressed),
-        // ControllerInput::LeftTrackpadClick(pressed) => (KeyCode::BTN_MIDDLE, pressed),
-        _ => return None,
-    })
+fn map_digital_mouse_input(_input: ControllerInput) -> Option<(KeyCode, bool)> {
+    // Some(match input {
+    //     // ControllerInput::LeftTrackpadClick(pressed) => (KeyCode::BTN_MIDDLE, pressed),
+    //     _ => return None,
+    // })
+    None
 }
 
 /// A virtual controller to send button inputs
@@ -80,8 +81,10 @@ pub struct VirtualController {
     xinput_mode: bool,
     controller: VirtualDevice,
     mouse: VirtualDevice,
+    force_feedback_events: Vec<ControllerOutput>,
     left_trackpad_prev: Option<(f32, f32, f32)>,
     right_trackpad_prev: Option<(f32, f32, f32)>,
+    mouse_feedback: f32,
 }
 
 /// Stick all the way in one direction
@@ -94,6 +97,7 @@ const TRIGGER_MAX: i32 = 255;
 // const FORCEFEEDBACK_MAX: u32 = 16;
 
 const MOUSE_SPEED: f32 = 256.0;
+const MOUSE_FEEDBACK_MAX: f32 = MOUSE_SPEED / 4.0;
 const WHEEL_SPEED: f32 = -64.0;
 
 const HAT_NONE: i32 = 0;
@@ -185,22 +189,26 @@ impl VirtualController {
         let mut mouse_axes = AttributeSet::<RelativeAxisCode>::new();
         mouse_axes.insert(RelativeAxisCode::REL_X);
         mouse_axes.insert(RelativeAxisCode::REL_Y);
-        mouse_axes.insert(RelativeAxisCode::REL_HWHEEL);
-        mouse_axes.insert(RelativeAxisCode::REL_WHEEL);
+        mouse_axes.insert(RelativeAxisCode::REL_HWHEEL_HI_RES);
+        mouse_axes.insert(RelativeAxisCode::REL_WHEEL_HI_RES);
         let mouse = VirtualDevice::builder()?
             .name(MOUSE_NAME)
             .with_keys(&mouse_keys)?
             .with_relative_axes(&mouse_axes)?
             .build()?;
 
+        let force_feedback_events = Vec::new();
         let left_trackpad_prev: Option<(f32, f32, f32)> = None;
         let right_trackpad_prev: Option<(f32, f32, f32)> = None;
+        let mouse_feedback: f32 = 0.0;
         Ok(Self {
             xinput_mode,
             controller,
             mouse,
+            force_feedback_events,
             left_trackpad_prev,
             right_trackpad_prev,
+            mouse_feedback,
         })
     }
 
@@ -279,6 +287,7 @@ impl AbstractVirtualController for VirtualController {
             }
             ControllerInput::RightTrackpadTouch(_) => {
                 self.right_trackpad_prev = None;
+                self.mouse_feedback = 0.0;
             }
             ControllerInput::LeftTrackpad(x, y, z) => {
                 if let Some((prev_x, prev_y, prev_z)) = self.left_trackpad_prev {
@@ -294,15 +303,26 @@ impl AbstractVirtualController for VirtualController {
                     let y_err = y_diff - (y_out as f32 / WHEEL_SPEED);
                     self.left_trackpad_prev = Some((x - x_err, y - y_err, z));
 
+                    if x_out.abs() > 0 || y_out.abs() > 0 {
+                        self.force_feedback_events
+                            .push(ControllerOutput::Haptic(HapticEvent {
+                                pad: HapticSide::Left,
+                                duration: 0x000A,
+                                interval: 0x0000,
+                                count: 0x0001,
+                                gain: 0xff,
+                            }));
+                    }
+
                     mevents.push(InputEvent::new(
                         EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_HWHEEL.0,
-                        x_out,
+                        RelativeAxisCode::REL_HWHEEL_HI_RES.0,
+                        x_out * 120,
                     ));
                     mevents.push(InputEvent::new(
                         EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_WHEEL.0,
-                        y_out,
+                        RelativeAxisCode::REL_WHEEL_HI_RES.0,
+                        y_out * 120,
                     ));
                 } else {
                     self.left_trackpad_prev = Some((x, y, z));
@@ -322,6 +342,21 @@ impl AbstractVirtualController for VirtualController {
                     let y_err = y_diff - (y_out as f32 / MOUSE_SPEED);
                     self.right_trackpad_prev = Some((x - x_err, y - y_err, z));
 
+                    let mouse_dist =
+                        ((x_out as f32 * x_out as f32) + (y_out as f32 * y_out as f32)).sqrt();
+                    self.mouse_feedback += mouse_dist;
+                    if self.mouse_feedback >= MOUSE_FEEDBACK_MAX {
+                        self.force_feedback_events
+                            .push(ControllerOutput::Haptic(HapticEvent {
+                                pad: HapticSide::Right,
+                                duration: 0x000A,
+                                interval: 0x0000,
+                                count: 0x0001,
+                                gain: 0xff,
+                            }));
+                        self.mouse_feedback %= MOUSE_FEEDBACK_MAX;
+                    }
+
                     let y_out = y_out.neg();
                     mevents.push(InputEvent::new(
                         EventType::RELATIVE.0,
@@ -336,6 +371,23 @@ impl AbstractVirtualController for VirtualController {
                 } else {
                     self.right_trackpad_prev = Some((x, y, z));
                 }
+            }
+            ControllerInput::RightTrackpadClick(pressed) => {
+                self.force_feedback_events
+                    .push(ControllerOutput::Haptic(HapticEvent {
+                        pad: HapticSide::Right,
+                        duration: 0x000A,
+                        interval: 0x0000,
+                        count: 0x0001,
+                        gain: 0xff,
+                    }));
+                mevents.push(InputEvent::new(
+                    EventType::KEY.0,
+                    KeyCode::BTN_LEFT.0,
+                    if pressed { 1 } else { 0 },
+                ));
+                self.mouse_feedback = 0.0;
+                self.perform_digital_input(input, &mut cevents, &mut mevents);
             }
             ControllerInput::RightJoyStick(x, y) => {
                 let y = y.neg();
@@ -408,5 +460,9 @@ impl AbstractVirtualController for VirtualController {
         self.controller.emit(&cevents)?;
         self.mouse.emit(&mevents)?;
         Ok(())
+    }
+
+    fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>> {
+        Ok(self.force_feedback_events.drain(..).collect())
     }
 }

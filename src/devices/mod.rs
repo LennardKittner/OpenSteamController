@@ -561,10 +561,37 @@ pub enum DeviceEvent {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub struct RumbleEvent {
+    pub intensity: u16,
+    pub left_speed: u16,
+    pub right_speed: u16,
+    pub left_gain: u8,
+    pub right_gain: u8,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum HapticSide {
+    Left,
+    Right,
+    Both,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct HapticEvent {
+    pub pad: HapticSide,
+    pub duration: u16,
+    pub interval: u16,
+    pub count: u16,
+    pub gain: u8,
+}
+
+#[derive(Debug, Copy, Clone)]
 /// Commands targeting the controller
 pub enum DeviceCommand {
     TurnOff,
     NintendoLayoutToggle,
+    Rumble(RumbleEvent),
+    Haptic(HapticEvent),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -614,6 +641,8 @@ pub trait Device {
     fn prepare_write(&mut self) {}
     /// turn off the controller
     fn turn_off(&mut self) -> Result<(), DeviceError>;
+    fn set_rumble(&mut self, event: RumbleEvent) -> Result<(), DeviceError>;
+    fn set_haptic(&mut self, event: HapticEvent) -> Result<(), DeviceError>;
     /// whether the app should periodically listen for packets from the controllers
     fn allow_passive_refresh(&mut self) -> bool;
 
@@ -725,6 +754,8 @@ pub trait Device {
                     .device_properties
                     .nintendo_layout;
             }
+            DeviceCommand::Rumble(event) => self.set_rumble(event)?,
+            DeviceCommand::Haptic(event) => self.set_haptic(event)?,
         }
         Ok(())
     }

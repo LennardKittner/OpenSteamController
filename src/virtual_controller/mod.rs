@@ -10,6 +10,8 @@ pub mod windows;
 #[allow(unused_imports)]
 pub use windows::VirtualController;
 
+use crate::devices::{HapticEvent, RumbleEvent};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Backed independent controller inputs
 pub enum ControllerInput {
@@ -49,8 +51,16 @@ pub enum ControllerInput {
     Ignore,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ControllerOutput {
+    Rumble(RumbleEvent),
+    Haptic(HapticEvent),
+}
+
 /// Used to implement OS independent virtual controller
 pub trait AbstractVirtualController {
     /// Send a virtual controller input
     fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()>;
+    /// Receive virtual controller output
+    fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>>;
 }

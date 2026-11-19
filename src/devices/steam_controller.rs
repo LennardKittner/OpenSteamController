@@ -2,7 +2,10 @@ use std::ops::Range;
 
 use crate::{
     debug_println,
-    devices::{ChargingStatus, Device, DeviceCommand, DeviceEvent, DeviceState},
+    devices::{
+        ChargingStatus, Device, DeviceCommand, DeviceEvent, DeviceState, HapticEvent, HapticSide,
+        RumbleEvent,
+    },
     virtual_controller::ControllerInput,
 };
 use bitflags::{bitflags, bitflags_match};
@@ -382,6 +385,46 @@ impl Device for SteamController {
             buf
         };
         self.get_device_state().write_hid_report(&buffer)?;
+        Ok(())
+    }
+
+    fn set_rumble(&mut self, event: RumbleEvent) -> Result<(), super::DeviceError> {
+        let buffer = vec![
+            0x80u8,
+            event.intensity as u8,
+            (event.intensity >> 8) as u8,
+            event.left_speed as u8,
+            (event.left_speed >> 8) as u8,
+            event.left_gain,
+            event.right_speed as u8,
+            (event.right_speed >> 8) as u8,
+            event.right_gain,
+        ];
+        self.get_device_state()
+            .hid_device
+            .send_output_report(&buffer)?;
+        Ok(())
+    }
+
+    fn set_haptic(&mut self, event: HapticEvent) -> Result<(), super::DeviceError> {
+        let buffer = vec![
+            0x81u8,
+            match event.pad {
+                HapticSide::Left => 1u8,
+                HapticSide::Right => 0u8,
+                HapticSide::Both => 2u8,
+            },
+            event.duration as u8,
+            (event.duration >> 8) as u8,
+            event.interval as u8,
+            (event.interval >> 8) as u8,
+            event.count as u8,
+            (event.count >> 8) as u8,
+            event.gain,
+        ];
+        self.get_device_state()
+            .hid_device
+            .send_output_report(&buffer)?;
         Ok(())
     }
 
