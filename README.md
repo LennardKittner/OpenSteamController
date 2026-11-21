@@ -34,6 +34,7 @@ This project is not affiliated with, endorsed by, or associated with Valve in an
     - Both trackpads
 - Shutdown controller via tray or (Steam button + Y)
 - Switch between default and Nintendo layout (swap A/B X/Y) via tray or (Steam button + A)
+- Trackpad mouse (Linux only)
 
 
 ## Planned Feature

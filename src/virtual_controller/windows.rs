@@ -28,34 +28,36 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
     };
 
     match input {
-        ControllerInput::South(set) => bit_flag_helper(set, XButtons::A, current_buttons),
         ControllerInput::A(set) => bit_flag_helper(set, XButtons::A, current_buttons),
-        ControllerInput::East(set) => bit_flag_helper(set, XButtons::B, current_buttons),
         ControllerInput::B(set) => bit_flag_helper(set, XButtons::B, current_buttons),
-        ControllerInput::North(set) => bit_flag_helper(set, XButtons::Y, current_buttons),
+        ControllerInput::C(_) => current_buttons,
         ControllerInput::X(set) => bit_flag_helper(set, XButtons::X, current_buttons),
-        ControllerInput::West(set) => bit_flag_helper(set, XButtons::X, current_buttons),
         ControllerInput::Y(set) => bit_flag_helper(set, XButtons::Y, current_buttons),
-        ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
-        ControllerInput::RightBumper(set) => bit_flag_helper(set, XButtons::RB, current_buttons),
-        ControllerInput::Select(set) => bit_flag_helper(set, XButtons::BACK, current_buttons),
-        ControllerInput::Start(set) => bit_flag_helper(set, XButtons::START, current_buttons),
-        ControllerInput::Mode(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
-        ControllerInput::LeftThumb(set) => bit_flag_helper(set, XButtons::LTHUMB, current_buttons),
-        ControllerInput::RightThumb(set) => bit_flag_helper(set, XButtons::RTHUMB, current_buttons),
+        ControllerInput::Z(_) => current_buttons,
+
         ControllerInput::Up(set) => bit_flag_helper(set, XButtons::UP, current_buttons),
         ControllerInput::Down(set) => bit_flag_helper(set, XButtons::DOWN, current_buttons),
         ControllerInput::Left(set) => bit_flag_helper(set, XButtons::LEFT, current_buttons),
         ControllerInput::Right(set) => bit_flag_helper(set, XButtons::RIGHT, current_buttons),
-        ControllerInput::Menu(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
-        ControllerInput::Home(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
 
-        ControllerInput::Z(_) => current_buttons,
-        ControllerInput::C(_) => current_buttons,
-        input => {
-            println!("Unknown or analog input {:?}", input);
-            current_buttons
-        }
+        ControllerInput::Start(set) => bit_flag_helper(set, XButtons::START, current_buttons),
+        ControllerInput::Select(set) => bit_flag_helper(set, XButtons::BACK, current_buttons),
+        ControllerInput::Mode(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
+        ControllerInput::Menu(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
+
+        ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
+        ControllerInput::LeftTriggerClick(_) => current_buttons,
+        ControllerInput::LeftThumb(set) => bit_flag_helper(set, XButtons::LTHUMB, current_buttons),
+        ControllerInput::LeftGrip1(_) => current_buttons,
+        ControllerInput::LeftGrip2(_) => current_buttons,
+
+        ControllerInput::RightBumper(set) => bit_flag_helper(set, XButtons::RB, current_buttons),
+        ControllerInput::RightTriggerClick(_) => current_buttons,
+        ControllerInput::RightThumb(set) => bit_flag_helper(set, XButtons::RTHUMB, current_buttons),
+        ControllerInput::RightGrip1(_) => current_buttons,
+        ControllerInput::RightGrip2(_) => current_buttons,
+
+        _ => current_buttons,
     }
 }
 
@@ -79,10 +81,10 @@ impl VirtualController {
 impl AbstractVirtualController for VirtualController {
     fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
         match input {
-            ControllerInput::LeftTrackpad(_, _, _) => {
+            ControllerInput::Wheel(_, _) => {
                 return Ok(());
             }
-            ControllerInput::RightTrackpad(_, _, _) => {
+            ControllerInput::Mouse(_, _) => {
                 return Ok(());
             }
             ControllerInput::RightJoyStick(x, y) => {
