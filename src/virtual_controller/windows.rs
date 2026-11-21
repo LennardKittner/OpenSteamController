@@ -56,6 +56,8 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
         ControllerInput::RightThumb(set) => bit_flag_helper(set, XButtons::RTHUMB, current_buttons),
         ControllerInput::RightGrip1(_) => current_buttons,
         ControllerInput::RightGrip2(_) => current_buttons,
+
+        _ => current_buttons,
     }
 }
 
