@@ -214,7 +214,8 @@ pub struct DeviceProperties {
     pub charging: Option<ChargingStatus>,
     pub connected: Option<bool>,
     pub previous_button_bitmap: u64,
-    pub nintendo_layout: bool,
+    pub layout: DeviceLayout,
+    pub controller_layout: DeviceLayout,
     pub controller_id: u64,
 }
 
@@ -413,7 +414,8 @@ impl DeviceProperties {
             charging: None,
             connected: None,
             previous_button_bitmap: 0,
-            nintendo_layout: false,
+            layout: DeviceLayout::Xbox,
+            controller_layout: DeviceLayout::Xbox,
             controller_id: 99,
         }
     }
@@ -450,10 +452,10 @@ impl DeviceProperties {
             PropertyDescriptorWrapper::Bool(PropertyDescriptor {
                 name: "nintendo_layout",
                 pretty_name: "Use Nintendo Layout",
-                data: Some(self.nintendo_layout),
+                data: Some(self.controller_layout == DeviceLayout::Nintendo),
                 suffix: "",
                 property_type: PropertyType::ReadWrite,
-                create_event: &move |_| Some(DeviceCommand::NintendoLayoutToggle),
+                create_event: &move |_| Some(DeviceCommand::SwitchLayout(DeviceLayout::Nintendo)),
             }),
         ]
     }
@@ -560,11 +562,19 @@ pub enum DeviceEvent {
     Command(DeviceCommand),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+/// Events for or from the device
+pub enum DeviceLayout {
+    Xbox,
+    Nintendo,
+    Lizard,
+}
+
 #[derive(Debug, Copy, Clone)]
 /// Commands targeting the controller
 pub enum DeviceCommand {
     TurnOff,
-    NintendoLayoutToggle,
+    SwitchLayout(DeviceLayout),
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -682,34 +692,17 @@ pub trait Device {
     /// Only the battery level is actively queried because it is not communicated by the device on its own
     fn passive_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
         let mut pressed_buttons = vec![];
-        let nintendo_layout = self
-            .get_device_state_mut()
-            .device_properties
-            .nintendo_layout;
         if self.allow_passive_refresh() {
             if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
                 for event in events {
-                    match (nintendo_layout, event) {
-                        (true, DeviceEvent::ButtonPressed(ControllerInput::A(pressed))) => {
-                            pressed_buttons.push(ControllerInput::B(pressed))
-                        }
-                        (true, DeviceEvent::ButtonPressed(ControllerInput::B(pressed))) => {
-                            pressed_buttons.push(ControllerInput::A(pressed))
-                        }
-                        (true, DeviceEvent::ButtonPressed(ControllerInput::X(pressed))) => {
-                            pressed_buttons.push(ControllerInput::Y(pressed))
-                        }
-                        (true, DeviceEvent::ButtonPressed(ControllerInput::Y(pressed))) => {
-                            pressed_buttons.push(ControllerInput::X(pressed))
-                        }
-                        (_, DeviceEvent::ButtonPressed(button)) => pressed_buttons.push(button),
-                        (_, DeviceEvent::Command(command)) => self.try_apply(command)?,
+                    match event {
+                        DeviceEvent::ButtonPressed(button) => pressed_buttons.push(button),
+                        DeviceEvent::Command(command) => self.try_apply(command)?,
                         _ => self.get_device_state_mut().update_self_with_event(&event),
                     }
                 }
             }
         }
-
         Ok(pressed_buttons)
     }
 
@@ -717,13 +710,18 @@ pub trait Device {
     fn try_apply(&mut self, command: DeviceCommand) -> Result<(), DeviceError> {
         match command {
             DeviceCommand::TurnOff => self.turn_off()?,
-            DeviceCommand::NintendoLayoutToggle => {
-                self.get_device_state_mut()
-                    .device_properties
-                    .nintendo_layout = !self
-                    .get_device_state_mut()
-                    .device_properties
-                    .nintendo_layout;
+            DeviceCommand::SwitchLayout(DeviceLayout::Xbox) => {
+                let props = &mut self.get_device_state_mut().device_properties;
+                props.controller_layout = DeviceLayout::Xbox;
+                props.layout = DeviceLayout::Xbox;
+            }
+            DeviceCommand::SwitchLayout(DeviceLayout::Nintendo) => {
+                let props = &mut self.get_device_state_mut().device_properties;
+                props.controller_layout = DeviceLayout::Nintendo;
+                props.layout = DeviceLayout::Nintendo;
+            }
+            DeviceCommand::SwitchLayout(DeviceLayout::Lizard) => {
+                self.get_device_state_mut().device_properties.layout = DeviceLayout::Lizard;
             }
         }
         Ok(())

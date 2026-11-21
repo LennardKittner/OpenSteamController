@@ -2,8 +2,8 @@ use std::ops::Neg;
 
 use crate::debug_println;
 use crate::virtual_controller::{AbstractVirtualController, ControllerInput};
-use uinput::event::{Controller, Keyboard};
 use uinput::event::{absolute, controller, keyboard, relative};
+use uinput::event::{Controller, Keyboard};
 use uinput::{Device, Result};
 
 /// Xbox series x
