@@ -25,45 +25,66 @@ fn map_digital_controller_input(
     input: ControllerInput,
 ) -> Option<(uinput::event::Controller, bool)> {
     Some(match input {
-        ControllerInput::South(pressed) => {
-            (Controller::GamePad(controller::GamePad::South), pressed)
-        }
         ControllerInput::A(pressed) => (Controller::GamePad(controller::GamePad::A), pressed),
-        ControllerInput::East(pressed) => (Controller::GamePad(controller::GamePad::East), pressed),
         ControllerInput::B(pressed) => (Controller::GamePad(controller::GamePad::B), pressed),
         ControllerInput::C(pressed) => (Controller::GamePad(controller::GamePad::C), pressed),
-        ControllerInput::North(pressed) => {
-            (Controller::GamePad(controller::GamePad::North), pressed)
-        }
         ControllerInput::X(pressed) => (Controller::GamePad(controller::GamePad::X), pressed),
-        ControllerInput::West(pressed) => (Controller::GamePad(controller::GamePad::West), pressed),
         ControllerInput::Y(pressed) => (Controller::GamePad(controller::GamePad::Y), pressed),
         ControllerInput::Z(pressed) => (Controller::GamePad(controller::GamePad::Z), pressed),
-        ControllerInput::LeftBumper(pressed) => {
-            (Controller::GamePad(controller::GamePad::TL), pressed)
-        }
-        ControllerInput::RightBumper(pressed) => {
-            (Controller::GamePad(controller::GamePad::TR), pressed)
-        }
-        ControllerInput::Select(pressed) => {
-            (Controller::GamePad(controller::GamePad::Select), pressed)
-        }
-        ControllerInput::Start(pressed) => {
-            (Controller::GamePad(controller::GamePad::Start), pressed)
-        }
-        ControllerInput::Mode(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
-        ControllerInput::LeftThumb(pressed) => {
-            (Controller::GamePad(controller::GamePad::ThumbL), pressed)
-        }
-        ControllerInput::RightThumb(pressed) => {
-            (Controller::GamePad(controller::GamePad::ThumbR), pressed)
-        }
-        ControllerInput::Menu(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
-        ControllerInput::Home(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
+
         ControllerInput::Up(pressed) => (Controller::DPad(controller::DPad::Up), pressed),
         ControllerInput::Down(pressed) => (Controller::DPad(controller::DPad::Down), pressed),
         ControllerInput::Left(pressed) => (Controller::DPad(controller::DPad::Left), pressed),
         ControllerInput::Right(pressed) => (Controller::DPad(controller::DPad::Right), pressed),
+
+        ControllerInput::Start(pressed) => {
+            (Controller::GamePad(controller::GamePad::Start), pressed)
+        }
+        ControllerInput::Select(pressed) => {
+            (Controller::GamePad(controller::GamePad::Select), pressed)
+        }
+        ControllerInput::Mode(pressed) => (Controller::GamePad(controller::GamePad::Mode), pressed),
+        ControllerInput::Menu(_pressed) => {
+            // (Controller::GamePad(controller::GamePad::), pressed),
+            return None;
+        }
+
+        ControllerInput::LeftBumper(pressed) => {
+            (Controller::GamePad(controller::GamePad::TL), pressed)
+        }
+        ControllerInput::LeftTriggerClick(pressed) => {
+            (Controller::GamePad(controller::GamePad::TL2), pressed)
+        }
+        ControllerInput::LeftThumb(pressed) => {
+            (Controller::GamePad(controller::GamePad::ThumbL), pressed)
+        }
+        ControllerInput::LeftGrip1(_pressed) => {
+            // (Controller::GamePad(controller::GamePad::GripL), pressed)
+            return None;
+        }
+        ControllerInput::LeftGrip2(_pressed) => {
+            // (Controller::GamePad(controller::GamePad::GripL2), pressed)
+            return None;
+        }
+
+        ControllerInput::RightBumper(pressed) => {
+            (Controller::GamePad(controller::GamePad::TR), pressed)
+        }
+        ControllerInput::RightTriggerClick(pressed) => {
+            (Controller::GamePad(controller::GamePad::TR2), pressed)
+        }
+        ControllerInput::RightThumb(pressed) => {
+            (Controller::GamePad(controller::GamePad::ThumbR), pressed)
+        }
+        ControllerInput::RightGrip1(_pressed) => {
+            // (Controller::GamePad(controller::GamePad::GripR), pressed)
+            return None;
+        }
+        ControllerInput::RightGrip2(_pressed) => {
+            // (Controller::GamePad(controller::GamePad::GripR2), pressed)
+            return None;
+        }
+
         _ => return None,
     })
 }
@@ -91,10 +112,12 @@ fn map_digital_keyboard_input(input: ControllerInput) -> Option<(uinput::event::
         ControllerInput::ShiftKey(pressed) => (Keyboard::Key(keyboard::Key::LeftShift), pressed),
         ControllerInput::AltKey(pressed) => (Keyboard::Key(keyboard::Key::LeftAlt), pressed),
         ControllerInput::MetaKey(pressed) => (Keyboard::Key(keyboard::Key::LeftMeta), pressed),
+
         ControllerInput::UpKey(pressed) => (Keyboard::Key(keyboard::Key::Up), pressed),
         ControllerInput::DownKey(pressed) => (Keyboard::Key(keyboard::Key::Down), pressed),
         ControllerInput::LeftKey(pressed) => (Keyboard::Key(keyboard::Key::Left), pressed),
         ControllerInput::RightKey(pressed) => (Keyboard::Key(keyboard::Key::Right), pressed),
+
         _ => return None,
     })
 }
@@ -287,6 +310,67 @@ impl AbstractVirtualController for VirtualController {
                 )?;
                 self.perform_digital_input(input)?;
             }
+
+            ControllerInput::LeftJoyStick(x, y) => {
+                let y = y.neg();
+                self.controller.position(
+                    &uinput::event::absolute::Position::X,
+                    if x.is_sign_positive() {
+                        x * STICK_MAX as f32
+                    } else {
+                        x.neg() * STICK_MIN as f32
+                    } as i32,
+                )?;
+                self.controller.position(
+                    &uinput::event::absolute::Position::Y,
+                    if y.is_sign_positive() {
+                        y * STICK_MAX as f32
+                    } else {
+                        y.neg() * STICK_MIN as f32
+                    } as i32,
+                )?;
+            }
+            ControllerInput::RightJoyStick(x, y) => {
+                let y = y.neg();
+                self.controller.position(
+                    &uinput::event::absolute::Position::RX,
+                    if x.is_sign_positive() {
+                        x * STICK_MAX as f32
+                    } else {
+                        x.neg() * STICK_MIN as f32
+                    } as i32,
+                )?;
+                self.controller.position(
+                    &uinput::event::absolute::Position::RY,
+                    if y.is_sign_positive() {
+                        y * STICK_MAX as f32
+                    } else {
+                        y.neg() * STICK_MIN as f32
+                    } as i32,
+                )?;
+            }
+
+            ControllerInput::LeftTrigger(force) => {
+                self.controller.position(
+                    &uinput::event::absolute::Position::Z,
+                    if force.is_sign_positive() {
+                        force * TRIGGER_MAX as f32
+                    } else {
+                        0f32
+                    } as i32,
+                )?;
+            }
+            ControllerInput::RightTrigger(force) => {
+                self.controller.position(
+                    &uinput::event::absolute::Position::RZ,
+                    if force.is_sign_positive() {
+                        force * TRIGGER_MAX as f32
+                    } else {
+                        0f32
+                    } as i32,
+                )?;
+            }
+
             ControllerInput::Wheel(x, y) => {
                 let x = x + self.wheel_error.0;
                 let x_out = x as i32;
@@ -315,64 +399,7 @@ impl AbstractVirtualController for VirtualController {
                 self.mouse
                     .position(&uinput::event::relative::Position::Y, y_out)?;
             }
-            ControllerInput::RightJoyStick(x, y) => {
-                let y = y.neg();
-                self.controller.position(
-                    &uinput::event::absolute::Position::RX,
-                    if x.is_sign_positive() {
-                        x * STICK_MAX as f32
-                    } else {
-                        x.neg() * STICK_MIN as f32
-                    } as i32,
-                )?;
-                self.controller.position(
-                    &uinput::event::absolute::Position::RY,
-                    if y.is_sign_positive() {
-                        y * STICK_MAX as f32
-                    } else {
-                        y.neg() * STICK_MIN as f32
-                    } as i32,
-                )?;
-            }
-            ControllerInput::LeftJoyStick(x, y) => {
-                let y = y.neg();
-                self.controller.position(
-                    &uinput::event::absolute::Position::X,
-                    if x.is_sign_positive() {
-                        x * STICK_MAX as f32
-                    } else {
-                        x.neg() * STICK_MIN as f32
-                    } as i32,
-                )?;
-                self.controller.position(
-                    &uinput::event::absolute::Position::Y,
-                    if y.is_sign_positive() {
-                        y * STICK_MAX as f32
-                    } else {
-                        y.neg() * STICK_MIN as f32
-                    } as i32,
-                )?;
-            }
-            ControllerInput::LeftTrigger(force) => {
-                self.controller.position(
-                    &uinput::event::absolute::Position::Z,
-                    if force.is_sign_positive() {
-                        force * TRIGGER_MAX as f32
-                    } else {
-                        0f32
-                    } as i32,
-                )?;
-            }
-            ControllerInput::RightTrigger(force) => {
-                self.controller.position(
-                    &uinput::event::absolute::Position::RZ,
-                    if force.is_sign_positive() {
-                        force * TRIGGER_MAX as f32
-                    } else {
-                        0f32
-                    } as i32,
-                )?;
-            }
+
             digital_input => self.perform_digital_input(digital_input)?,
         }
         self.controller.synchronize()?;

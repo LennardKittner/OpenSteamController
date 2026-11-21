@@ -2,8 +2,7 @@ use std::ops::Range;
 
 use crate::{
     debug_println,
-    devices::{ChargingStatus, Device, DeviceCommand, DeviceEvent, DeviceLayout, DeviceState},
-    virtual_controller::ControllerInput,
+    devices::{ChargingStatus, Device, DeviceEvent, DeviceOutput, DeviceState},
 };
 use bitflags::{bitflags, bitflags_match};
 
@@ -35,19 +34,9 @@ const TRACKPAD_LOCATION: Range<usize> = 18..30;
 /// Max value of an analog input
 const ANALOG_MAX: f32 = 0b01111111_11111111 as f32;
 
-/// Trackpad as mouse speed multiplier
-const TRACKPAD_MOUSE_SPEED: f32 = 256.0;
-/// Trackpad as wheel speed multiplier
-const TRACKPAD_WHEEL_SPEED: f32 = -64.0;
-/// Joystick as mouse speed multiplier
-const STICK_MOUSE_SPEED: f32 = 8.0;
-/// Joystick as wheel speed multiplier
-const STICK_WHEEL_SPEED: f32 = 1.0;
-
 pub struct SteamController {
     state: DeviceState,
-    left_trackpad_prev: Option<(f32, f32, f32)>,
-    right_trackpad_prev: Option<(f32, f32, f32)>,
+    bitmap: u32,
 }
 
 bitflags! {
@@ -95,13 +84,7 @@ impl SteamController {
 
     /// Initially disables the "lizard mode" and constructs the controller
     pub fn new_from_state(state: DeviceState) -> Self {
-        let left_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let right_trackpad_prev: Option<(f32, f32, f32)> = None;
-        Self {
-            state,
-            left_trackpad_prev,
-            right_trackpad_prev,
-        }
+        Self { state, bitmap: 0 }
     }
 
     /// Builds a packet based on a given command and a payload
@@ -119,201 +102,67 @@ impl SteamController {
     /// fixed size arrays instead of vectors here
     fn handle_buttons(&mut self, response: [u8; 4]) -> Vec<DeviceEvent> {
         let button_bitmap = Button::from_bits_truncate(u32::from_le_bytes(response));
-        let previous_bitmap = Button::from_bits_truncate(
-            self.get_device_state()
-                .device_properties
-                .previous_button_bitmap as u32,
-        );
+        let previous_bitmap = Button::from_bits_truncate(self.bitmap);
+        self.bitmap = button_bitmap.bits();
         let changed_buttons = button_bitmap.symmetric_difference(previous_bitmap);
 
         if !changed_buttons.is_empty() {
-            let mut result = self.get_buttons(&changed_buttons, &button_bitmap);
-            result.push(DeviceEvent::UpdateBitmap(button_bitmap.bits() as u64));
-            result
+            self.get_buttons(&changed_buttons, &button_bitmap)
         } else {
             vec![]
         }
     }
 
-    fn get_buttons_steam(&self, change: Button, states: &Button) -> Option<Vec<DeviceEvent>> {
-        if change.contains(Button::Steam) || !states.contains(Button::Steam) {
-            return None;
-        }
-        bitflags_match!(change, {
-            Button::A => if states.contains(Button::A) {
-                Some(vec![
-                    DeviceEvent::ButtonPressed(ControllerInput::A(false)),
-                    DeviceEvent::ButtonPressed(ControllerInput::Home(false)),
-                    DeviceEvent::Command(DeviceCommand::SwitchLayout(match self.state.device_properties.layout {
-                        DeviceLayout::Xbox => DeviceLayout::Nintendo,
-                        DeviceLayout::Nintendo => DeviceLayout::Xbox,
-                        DeviceLayout::Lizard => self.state.device_properties.controller_layout,
-                    })),
-                ])
-            } else {
-                None
-            },
-            Button::B => if states.contains(Button::B) {
-                Some(vec![
-                    DeviceEvent::ButtonPressed(ControllerInput::B(false)),
-                    DeviceEvent::ButtonPressed(ControllerInput::Home(false)),
-                    DeviceEvent::Command(DeviceCommand::SwitchLayout(match self.state.device_properties.layout {
-                        DeviceLayout::Lizard => self.state.device_properties.controller_layout,
-                        _ => DeviceLayout::Lizard,
-                    })),
-                ])
-            } else {
-                None
-            },
-            Button::Y => if states.contains(Button::Y) {
-                Some(vec![DeviceEvent::Command(DeviceCommand::TurnOff)])
-            } else {
-                None
-            },
-            _ => None,
-        })
-    }
-
-    fn get_buttons_xbox(&self, change: Button, states: &Button) -> Vec<DeviceEvent> {
-        bitflags_match!(change, {
-            Button::A =>                vec![DeviceEvent::ButtonPressed(ControllerInput::A(states.contains(Button::A)))],
-            Button::B =>                vec![DeviceEvent::ButtonPressed(ControllerInput::B(states.contains(Button::B)))],
-            Button::X =>                vec![DeviceEvent::ButtonPressed(ControllerInput::X(states.contains(Button::X)))],
-            Button::Y =>                vec![DeviceEvent::ButtonPressed(ControllerInput::Y(states.contains(Button::Y)))],
-            Button::ThumbRight =>       vec![DeviceEvent::ButtonPressed(ControllerInput::RightThumb(states.contains(Button::ThumbRight)))],
-            Button::Select =>           vec![DeviceEvent::ButtonPressed(ControllerInput::Select(states.contains(Button::Select)))],
-            Button::R4 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightBumper(states.contains(Button::R4)))], // TODO
-            Button::R5 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightTrigger(states.contains(Button::R5) as u8 as f32))], // TODO
-            Button::R1 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightBumper(states.contains(Button::R1)))],
-            Button::DpadDown =>         vec![DeviceEvent::ButtonPressed(ControllerInput::Down(states.contains(Button::DpadDown)))],
-            Button::DpadRight =>        vec![DeviceEvent::ButtonPressed(ControllerInput::Right(states.contains(Button::DpadRight)))],
-            Button::DpadLeft =>         vec![DeviceEvent::ButtonPressed(ControllerInput::Left(states.contains(Button::DpadLeft)))],
-            Button::DpadUp =>           vec![DeviceEvent::ButtonPressed(ControllerInput::Up(states.contains(Button::DpadUp)))],
-            Button::Start =>            vec![DeviceEvent::ButtonPressed(ControllerInput::Start(states.contains(Button::Start)))],
-            Button::ThumbLeft =>        vec![DeviceEvent::ButtonPressed(ControllerInput::LeftThumb(states.contains(Button::ThumbLeft)))],
-            Button::L4 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftBumper(states.contains(Button::L4)))], // TODO
-            Button::L5 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftTrigger(states.contains(Button::L5) as u8 as f32))], // TODO
-            Button::L1 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftBumper(states.contains(Button::L1)))], // TODO
-            Button::ThumbRightTouch =>  vec![], // TODO
-            Button::PadRightClick =>    vec![DeviceEvent::ButtonPressed(ControllerInput::LeftMouse(states.contains(Button::PadRightClick)))], // TODO
-            Button::R2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightTriggerClick(states.contains(Button::R2)))],
-            Button::ThumbLeftTouch =>   vec![], // TODO
-            Button::PadLeftClick =>     vec![], // TODO
-            Button::L2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftTriggerClick(states.contains(Button::L2)))],
-            Button::GripRight =>        vec![], // TODO
-            Button::GripLeft =>         vec![], // TODO
-            Button::PadRightTouch =>    vec![],
-            Button::PadLeftTouch =>     vec![],
-            Button::Steam =>            vec![DeviceEvent::ButtonPressed(ControllerInput::Home(states.contains(Button::Steam)))],
-            Button::Menu => if states.contains(Button::Menu) {
-                vec![DeviceEvent::Command(DeviceCommand::SwitchLayout(DeviceLayout::Lizard))]
-            } else {
-                vec![]
-            },
-            _ => panic!("Undefined Button!"),
-        })
-    }
-
-    fn get_buttons_nintendo(&self, change: Button, states: &Button) -> Vec<DeviceEvent> {
-        bitflags_match!(change, {
-            Button::A =>                vec![DeviceEvent::ButtonPressed(ControllerInput::B(states.contains(Button::A)))],
-            Button::B =>                vec![DeviceEvent::ButtonPressed(ControllerInput::A(states.contains(Button::B)))],
-            Button::X =>                vec![DeviceEvent::ButtonPressed(ControllerInput::Y(states.contains(Button::X)))],
-            Button::Y =>                vec![DeviceEvent::ButtonPressed(ControllerInput::X(states.contains(Button::Y)))],
-            Button::ThumbRight =>       vec![DeviceEvent::ButtonPressed(ControllerInput::RightThumb(states.contains(Button::ThumbRight)))],
-            Button::Select =>           vec![DeviceEvent::ButtonPressed(ControllerInput::Select(states.contains(Button::Select)))],
-            Button::R4 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightBumper(states.contains(Button::R4)))], // TODO
-            Button::R5 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightTrigger(states.contains(Button::R5) as u8 as f32))], // TODO
-            Button::R1 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightBumper(states.contains(Button::R1)))],
-            Button::DpadDown =>         vec![DeviceEvent::ButtonPressed(ControllerInput::Down(states.contains(Button::DpadDown)))],
-            Button::DpadRight =>        vec![DeviceEvent::ButtonPressed(ControllerInput::Right(states.contains(Button::DpadRight)))],
-            Button::DpadLeft =>         vec![DeviceEvent::ButtonPressed(ControllerInput::Left(states.contains(Button::DpadLeft)))],
-            Button::DpadUp =>           vec![DeviceEvent::ButtonPressed(ControllerInput::Up(states.contains(Button::DpadUp)))],
-            Button::Start =>            vec![DeviceEvent::ButtonPressed(ControllerInput::Start(states.contains(Button::Start)))],
-            Button::ThumbLeft =>        vec![DeviceEvent::ButtonPressed(ControllerInput::LeftThumb(states.contains(Button::ThumbLeft)))],
-            Button::L4 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftBumper(states.contains(Button::L4)))], // TODO
-            Button::L5 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftTrigger(states.contains(Button::L5) as u8 as f32))], // TODO
-            Button::L1 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftBumper(states.contains(Button::L1)))], // TODO
-            Button::ThumbRightTouch =>  vec![], // TODO
-            Button::PadRightClick =>    vec![DeviceEvent::ButtonPressed(ControllerInput::LeftMouse(states.contains(Button::PadRightClick)))], // TODO
-            Button::R2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightTriggerClick(states.contains(Button::R2)))],
-            Button::ThumbLeftTouch =>   vec![], // TODO
-            Button::PadLeftClick =>     vec![], // TODO
-            Button::L2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftTriggerClick(states.contains(Button::L2)))],
-            Button::GripRight =>        vec![], // TODO
-            Button::GripLeft =>         vec![], // TODO
-            Button::PadRightTouch =>    vec![],
-            Button::PadLeftTouch =>     vec![],
-            Button::Steam =>            vec![DeviceEvent::ButtonPressed(ControllerInput::Home(states.contains(Button::Steam)))],
-            Button::Menu => if states.contains(Button::Menu) {
-                vec![DeviceEvent::Command(DeviceCommand::SwitchLayout(DeviceLayout::Lizard))]
-            } else {
-                vec![]
-            },
-            _ => panic!("Undefined Button!"),
-        })
-    }
-
-    fn get_buttons_lizard(&self, change: Button, states: &Button) -> Vec<DeviceEvent> {
-        bitflags_match!(change, {
-            Button::A =>                vec![DeviceEvent::ButtonPressed(ControllerInput::EnterKey(states.contains(Button::A)))],
-            Button::B =>                vec![DeviceEvent::ButtonPressed(ControllerInput::EscKey(states.contains(Button::B)))],
-            Button::X =>                vec![], // TODO
-            Button::Y =>                vec![],
-            Button::ThumbRight =>       vec![DeviceEvent::ButtonPressed(ControllerInput::MiddleMouse(states.contains(Button::ThumbRight)))], // TODO
-            Button::Select =>           vec![], // TODO
-            Button::R4 =>               vec![], // TODO
-            Button::R5 =>               vec![], // TODO
-            Button::R1 =>               vec![], // TODO
-            Button::DpadDown =>         vec![DeviceEvent::ButtonPressed(ControllerInput::DownKey(states.contains(Button::DpadDown)))],
-            Button::DpadRight =>        vec![DeviceEvent::ButtonPressed(ControllerInput::RightKey(states.contains(Button::DpadRight)))],
-            Button::DpadLeft =>         vec![DeviceEvent::ButtonPressed(ControllerInput::LeftKey(states.contains(Button::DpadLeft)))],
-            Button::DpadUp =>           vec![DeviceEvent::ButtonPressed(ControllerInput::UpKey(states.contains(Button::DpadUp)))],
-            Button::Start =>            vec![], // TODO
-            Button::ThumbLeft =>        vec![], // TODO
-            Button::L4 =>               vec![], // TODO
-            Button::L5 =>               vec![], // TODO
-            Button::L1 =>               vec![], // TODO
-            Button::ThumbRightTouch =>  vec![], // TODO
-            Button::PadRightClick =>    vec![DeviceEvent::ButtonPressed(ControllerInput::LeftMouse(states.contains(Button::PadRightClick)))],
-            Button::R2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::LeftMouse(states.contains(Button::R2)))],
-            Button::ThumbLeftTouch =>   vec![], // TODO
-            Button::PadLeftClick =>     vec![], // TODO
-            Button::L2 =>               vec![DeviceEvent::ButtonPressed(ControllerInput::RightMouse(states.contains(Button::L2)))],
-            Button::GripRight =>        vec![], // TODO
-            Button::GripLeft =>         vec![], // TODO
-            Button::PadRightTouch =>    vec![],
-            Button::PadLeftTouch =>     vec![],
-            Button::Steam =>            vec![], // TODO
-            Button::Menu => if !states.contains(Button::Menu) {
-                vec![DeviceEvent::Command(DeviceCommand::SwitchLayout(self.state.device_properties.controller_layout))]
-            } else {
-                vec![]
-            },
-            _ => panic!("Undefined Button!"),
-        })
-    }
-
     /// Converts a bitmap of which buttons changed state and a bitmap of the current button states
-    /// into a Vec of ControllerInput filled with digital ControllerInput, either pressed or
+    /// into a Vec of DeviceEvent filled with digital DeviceOutput, either pressed or
     /// released
-    fn get_buttons(&mut self, changes: &Button, states: &Button) -> Vec<DeviceEvent> {
+    fn get_buttons(&self, changes: &Button, states: &Button) -> Vec<DeviceEvent> {
         changes
             .iter()
-            .flat_map(|button| {
-                bitflags_match!(button, {
-                    Button::PadRightTouch => self.right_trackpad_prev = None,
-                    Button::PadLeftTouch => self.left_trackpad_prev = None,
-                    _ => {},
-                });
-                if let Some(steam_bindings) = self.get_buttons_steam(button, states) {
-                    return steam_bindings;
-                }
-                match self.state.device_properties.layout {
-                    DeviceLayout::Xbox => self.get_buttons_xbox(button, states),
-                    DeviceLayout::Nintendo => self.get_buttons_nintendo(button, states),
-                    DeviceLayout::Lizard => self.get_buttons_lizard(button, states),
-                }
+            .map(|button| {
+                DeviceEvent::ButtonPressed(bitflags_match!(button, {
+                    Button::A => DeviceOutput::A(states.contains(Button::A)),
+                    Button::B => DeviceOutput::B(states.contains(Button::B)),
+                    Button::X => DeviceOutput::X(states.contains(Button::X)),
+                    Button::Y => DeviceOutput::Y(states.contains(Button::Y)),
+
+                    Button::DpadUp => DeviceOutput::Up(states.contains(Button::DpadUp)),
+                    Button::DpadDown => DeviceOutput::Down(states.contains(Button::DpadDown)),
+                    Button::DpadLeft => DeviceOutput::Left(states.contains(Button::DpadLeft)),
+                    Button::DpadRight => DeviceOutput::Right(states.contains(Button::DpadRight)),
+
+                    Button::Start => DeviceOutput::Menu(states.contains(Button::Start)),
+                    Button::Select => DeviceOutput::View(states.contains(Button::Select)),
+                    Button::Steam => DeviceOutput::Steam(states.contains(Button::Steam)),
+                    Button::Menu => DeviceOutput::QuickAccessMenu(states.contains(Button::Menu)),
+
+                    Button::ThumbLeftTouch => DeviceOutput::LeftJoyStickTouch(states.contains(Button::ThumbLeftTouch)),
+                    Button::ThumbRightTouch => DeviceOutput::RightJoyStickTouch(states.contains(Button::ThumbRightTouch)),
+
+                    Button::L1 => DeviceOutput::L1(states.contains(Button::L1)),
+                    Button::L2 => DeviceOutput::L2(states.contains(Button::L2)),
+                    Button::ThumbLeft => DeviceOutput::L3(states.contains(Button::ThumbLeft)),
+                    Button::L4 => DeviceOutput::L4(states.contains(Button::L4)),
+                    Button::L5 => DeviceOutput::L5(states.contains(Button::L5)),
+
+                    Button::GripLeft => DeviceOutput::LeftGripTouch(states.contains(Button::GripLeft)),
+
+                    Button::R1 => DeviceOutput::R1(states.contains(Button::R1)),
+                    Button::R2 => DeviceOutput::R2(states.contains(Button::R2)),
+                    Button::ThumbRight => DeviceOutput::R3(states.contains(Button::ThumbRight)),
+                    Button::R4 => DeviceOutput::R4(states.contains(Button::R4)),
+                    Button::R5 => DeviceOutput::R5(states.contains(Button::R5)),
+
+                    Button::GripRight => DeviceOutput::RightGripTouch(states.contains(Button::GripRight)),
+
+                    Button::PadLeftClick => DeviceOutput::LeftTrackpadClick(states.contains(Button::PadLeftClick)),
+                    Button::PadLeftTouch => DeviceOutput::LeftTrackpadTouch(states.contains(Button::PadLeftTouch)),
+
+                    Button::PadRightClick => DeviceOutput::RightTrackpadClick(states.contains(Button::PadRightClick)),
+                    Button::PadRightTouch => DeviceOutput::RightTrackpadTouch(states.contains(Button::PadRightTouch)),
+
+                    _ => panic!("Undefined Button!"),
+                }))
             })
             .collect::<Vec<DeviceEvent>>()
     }
@@ -340,45 +189,23 @@ impl SteamController {
     }
 
     /// Converts four bytes of data into controller input events for the left and right trigger
-    fn handle_triggers(&self, response: [u8; 4]) -> Vec<DeviceEvent> {
+    fn handle_triggers(&mut self, response: [u8; 4]) -> Vec<DeviceEvent> {
         let left = Self::convert_analog(response[0..2].try_into().unwrap());
         let right = Self::convert_analog(response[2..4].try_into().unwrap());
-        if self.state.device_properties.layout == DeviceLayout::Lizard {
-            vec![]
-        } else {
-            vec![
-                DeviceEvent::ButtonPressed(ControllerInput::LeftTrigger(left)),
-                DeviceEvent::ButtonPressed(ControllerInput::RightTrigger(right)),
-            ]
-        }
+        vec![
+            DeviceEvent::ButtonPressed(DeviceOutput::LeftTrigger(left)),
+            DeviceEvent::ButtonPressed(DeviceOutput::RightTrigger(right)),
+        ]
     }
 
     /// Converts four bytes of data into controller input events for the left and right joystick
     fn handle_joysticks(&self, response: [u8; 8]) -> Vec<DeviceEvent> {
         let (left_x, left_y) = Self::convert_analog_2d(response[0..4].try_into().unwrap());
         let (right_x, right_y) = Self::convert_analog_2d(response[4..8].try_into().unwrap());
-        if self.state.device_properties.layout == DeviceLayout::Lizard {
-            let mut events = vec![];
-            // TODO: Check if the sticks are even being touched
-            if ((left_x * left_x) + (left_y * left_y)) > 0.05 {
-                events.push(DeviceEvent::ButtonPressed(ControllerInput::Wheel(
-                    left_x * STICK_WHEEL_SPEED,
-                    left_y * STICK_WHEEL_SPEED,
-                )));
-            }
-            if ((right_x * right_x) + (right_y * right_y)) > 0.05 {
-                events.push(DeviceEvent::ButtonPressed(ControllerInput::Mouse(
-                    right_x * STICK_MOUSE_SPEED,
-                    -right_y * STICK_MOUSE_SPEED,
-                )));
-            }
-            events
-        } else {
-            vec![
-                DeviceEvent::ButtonPressed(ControllerInput::LeftJoyStick(left_x, left_y)),
-                DeviceEvent::ButtonPressed(ControllerInput::RightJoyStick(right_x, right_y)),
-            ]
-        }
+        vec![
+            DeviceEvent::ButtonPressed(DeviceOutput::LeftJoyStick(left_x, left_y)),
+            DeviceEvent::ButtonPressed(DeviceOutput::RightJoyStick(right_x, right_y)),
+        ]
     }
 
     /// Converts four bytes of data into controller input events for the left and right trackpad
@@ -387,39 +214,10 @@ impl SteamController {
             Self::convert_analog_3d(response[0..6].try_into().unwrap());
         let (right_x, right_y, right_force) =
             Self::convert_analog_3d(response[6..12].try_into().unwrap());
-        let mut events = vec![];
-
-        if let Some((prev_x, prev_y, prev_force)) = self.left_trackpad_prev {
-            let x_diff = left_x - prev_x;
-            let y_diff = left_y - prev_y;
-            let _force_diff = left_force - prev_force;
-
-            self.left_trackpad_prev = Some((left_x, left_y, left_force));
-
-            events.push(DeviceEvent::ButtonPressed(ControllerInput::Wheel(
-                x_diff * TRACKPAD_WHEEL_SPEED,
-                y_diff * TRACKPAD_WHEEL_SPEED,
-            )));
-        } else {
-            self.left_trackpad_prev = Some((left_x, left_y, left_force));
-        }
-
-        if let Some((prev_x, prev_y, prev_force)) = self.right_trackpad_prev {
-            let x_diff = right_x - prev_x;
-            let y_diff = right_y - prev_y;
-            let _force_diff = right_force - prev_force;
-
-            self.right_trackpad_prev = Some((right_x, right_y, right_force));
-
-            events.push(DeviceEvent::ButtonPressed(ControllerInput::Mouse(
-                x_diff * TRACKPAD_MOUSE_SPEED,
-                -y_diff * TRACKPAD_MOUSE_SPEED,
-            )));
-        } else {
-            self.right_trackpad_prev = Some((right_x, right_y, right_force));
-        }
-
-        events
+        vec![
+            DeviceEvent::ButtonPressed(DeviceOutput::LeftTrackpad(left_x, left_y, left_force)),
+            DeviceEvent::ButtonPressed(DeviceOutput::RightTrackpad(right_x, right_y, right_force)),
+        ]
     }
 
     fn handle_status(response: &[u8; 16]) -> Vec<DeviceEvent> {
@@ -554,7 +352,7 @@ impl Device for SteamController {
         true
     }
 
-    fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, super::DeviceError> {
+    fn active_refresh_state(&mut self) -> Result<Vec<DeviceOutput>, super::DeviceError> {
         self.get_device_state()
             .write_hid_report(&SteamController::get_disable_lizard_mode_packet())?;
         Ok(Vec::new())

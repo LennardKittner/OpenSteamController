@@ -1,8 +1,7 @@
 pub mod steam_controller;
 
-use crate::{
-    debug_println, devices::steam_controller::SteamController, virtual_controller::ControllerInput,
-};
+use crate::{debug_println, devices::steam_controller::SteamController};
+use bitflags::bitflags;
 use hidapi::{HidApi, HidDevice, HidError};
 use std::{
     collections::HashSet,
@@ -50,13 +49,13 @@ impl Controller {
         }
     }
 
-    pub fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    pub fn active_refresh_state(&mut self) -> Result<Vec<DeviceOutput>, DeviceError> {
         match self {
             Controller::Hid(device) => device.active_refresh_state(),
         }
     }
 
-    pub fn passive_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    pub fn passive_refresh_state(&mut self) -> Result<Vec<DeviceOutput>, DeviceError> {
         match self {
             Controller::Hid(device) => device.passive_refresh_state(),
         }
@@ -199,6 +198,100 @@ fn connect_hid_devices() -> Result<Vec<DeviceBox>, DeviceError> {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum DeviceOutput {
+    A(bool),
+    B(bool),
+    X(bool),
+    Y(bool),
+
+    Up(bool),    // Steam Deck, Steam Controller (2026)
+    Down(bool),  // Steam Deck, Steam Controller (2026)
+    Left(bool),  // Steam Deck, Steam Controller (2026)
+    Right(bool), // Steam Deck, Steam Controller (2026)
+
+    Menu(bool), // Start
+    View(bool), // Select
+    Steam(bool),
+    QuickAccessMenu(bool), // Steam Deck, Steam Controller (2026)
+
+    LeftJoyStick(f32, f32),
+    LeftJoyStickTouch(bool), // Steam Deck, Steam Controller (2026)
+
+    RightJoyStick(f32, f32),  // Steam Deck, Steam Controller (2026)
+    RightJoyStickTouch(bool), // Steam Deck, Steam Controller (2026)
+
+    L1(bool),
+    L2(bool),
+    L3(bool),
+    L4(bool),
+    L5(bool), // Steam Deck, Steam Controller (2026)
+
+    LeftTrigger(f32),
+    LeftGripTouch(bool), // Steam Controller (2026)
+
+    R1(bool),
+    R2(bool),
+    R3(bool),
+    R4(bool),
+    R5(bool), // Steam Deck, Steam Controller (2026)
+
+    RightTrigger(f32),
+    RightGripTouch(bool), // Steam Controller (2026)
+
+    LeftTrackpad(f32, f32, f32),
+    LeftTrackpadClick(bool),
+    LeftTrackpadTouch(bool),
+
+    RightTrackpad(f32, f32, f32),
+    RightTrackpadClick(bool),
+    RightTrackpadTouch(bool),
+}
+
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct DeviceButton: u32 {
+        const A                  = 1 <<  0;
+        const B                  = 1 <<  1;
+        const X                  = 1 <<  2;
+        const Y                  = 1 <<  3;
+
+        const Up                 = 1 <<  4;
+        const Down               = 1 <<  5;
+        const Left               = 1 <<  6;
+        const Right              = 1 <<  7;
+
+        const Menu               = 1 <<  8;
+        const View               = 1 <<  9;
+        const Steam              = 1 << 10;
+        const QuickAccessMenu    = 1 << 11;
+
+        const LeftJoyStickTouch  = 1 << 12;
+        const RightJoyStickTouch = 1 << 13;
+
+        const L1                 = 1 << 14;
+        const L2                 = 1 << 15;
+        const L3                 = 1 << 16;
+        const L4                 = 1 << 17;
+        const L5                 = 1 << 18;
+
+        const R1                 = 1 << 19;
+        const R2                 = 1 << 20;
+        const R3                 = 1 << 21;
+        const R4                 = 1 << 22;
+        const R5                 = 1 << 23;
+
+        const LeftTrackpadTouch  = 1 << 24;
+        const LeftTrackpadClick  = 1 << 25;
+
+        const RightTrackpadTouch = 1 << 26;
+        const RightTrackpadClick = 1 << 27;
+
+        const LeftGripTouch      = 1 << 28;
+        const RightGripTouch     = 1 << 29;
+    }
+}
+
 #[derive(Debug)]
 pub struct DeviceState {
     pub hid_device: HidDevice,
@@ -213,7 +306,6 @@ pub struct DeviceProperties {
     pub battery_level: Option<u8>,
     pub charging: Option<ChargingStatus>,
     pub connected: Option<bool>,
-    pub previous_button_bitmap: u64,
     pub layout: DeviceLayout,
     pub controller_layout: DeviceLayout,
     pub controller_id: u64,
@@ -362,9 +454,6 @@ impl DeviceState {
             DeviceEvent::ButtonPressed(_controller_input) => {
                 panic!("ButtonPressed should be handled in the refreshes")
             }
-            DeviceEvent::UpdateBitmap(bitmap) => {
-                self.device_properties.previous_button_bitmap = *bitmap
-            }
             DeviceEvent::Command(_) => {}
         };
     }
@@ -413,7 +502,6 @@ impl DeviceProperties {
             battery_level: None,
             charging: None,
             connected: None,
-            previous_button_bitmap: 0,
             layout: DeviceLayout::Xbox,
             controller_layout: DeviceLayout::Xbox,
             controller_id: 99,
@@ -557,8 +645,7 @@ pub enum DeviceEvent {
     BatteryLevel(u8),
     Charging(ChargingStatus),
     WirelessConnected(bool),
-    ButtonPressed(ControllerInput),
-    UpdateBitmap(u64),
+    ButtonPressed(DeviceOutput),
     Command(DeviceCommand),
 }
 
@@ -654,10 +741,10 @@ pub trait Device {
     }
 
     /// Refreshes the state by querying all available information
-    fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    fn active_refresh_state(&mut self) -> Result<Vec<DeviceOutput>, DeviceError> {
         let packets = self.get_query_packets();
 
-        let mut pressed_buttons: Vec<ControllerInput> = vec![];
+        let mut pressed_buttons: Vec<DeviceOutput> = vec![];
         let mut responded = false;
         for packet in packets.into_iter() {
             self.prepare_write();
@@ -690,7 +777,7 @@ pub trait Device {
 
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
-    fn passive_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    fn passive_refresh_state(&mut self) -> Result<Vec<DeviceOutput>, DeviceError> {
         let mut pressed_buttons = vec![];
         if self.allow_passive_refresh() {
             if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
