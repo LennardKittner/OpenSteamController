@@ -68,12 +68,12 @@ fn map_digital_controller_input(
     })
 }
 
-fn map_digital_mouse_input(_input: ControllerInput) -> Option<(KeyCode, bool)> {
-    // Some(match input {
-    //     // ControllerInput::LeftTrackpadClick(pressed) => (KeyCode::BTN_MIDDLE, pressed),
-    //     _ => return None,
-    // })
-    None
+fn map_digital_mouse_input(input: ControllerInput) -> Option<(KeyCode, bool)> {
+    #[allow(unreachable_code)]
+    Some(match input {
+        // TODO
+        _ => return None,
+    })
 }
 
 /// A virtual controller to send button inputs
