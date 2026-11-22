@@ -28,13 +28,9 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
     };
 
     match input {
-        ControllerInput::South(set) => bit_flag_helper(set, XButtons::A, current_buttons),
         ControllerInput::A(set) => bit_flag_helper(set, XButtons::A, current_buttons),
-        ControllerInput::East(set) => bit_flag_helper(set, XButtons::B, current_buttons),
         ControllerInput::B(set) => bit_flag_helper(set, XButtons::B, current_buttons),
-        ControllerInput::North(set) => bit_flag_helper(set, XButtons::Y, current_buttons),
         ControllerInput::X(set) => bit_flag_helper(set, XButtons::X, current_buttons),
-        ControllerInput::West(set) => bit_flag_helper(set, XButtons::X, current_buttons),
         ControllerInput::Y(set) => bit_flag_helper(set, XButtons::Y, current_buttons),
         ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
         ControllerInput::RightBumper(set) => bit_flag_helper(set, XButtons::RB, current_buttons),

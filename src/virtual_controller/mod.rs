@@ -13,14 +13,14 @@ pub use windows::VirtualController;
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// Backed independent controller inputs
 pub enum ControllerInput {
-    South(bool),
+    /// A (Steam, Xbox) / B (Nintendo) / Cross (Sony) / BTN_A/BTN_SOUTH (Linux)
     A(bool),
-    East(bool),
+    /// B (Steam, Xbox) / A (Nintendo) / Circle (Sony) / BTN_B/BTN_EAST (Linux)
     B(bool),
     C(bool),
-    North(bool),
+    /// X (Steam, Xbox) / Y (Nintendo) / Square (Sony) / BTN_Y/BTN_WEST (Linux) / BTN_X/BTN_NORTH (Linux-Xbox)
     X(bool),
-    West(bool),
+    /// Y (Steam, Xbox) / X (Nintendo) / Triangle (Sony) / BTN_X/BTN_NORTH (Linux) / BTN_Y/BTN_WEST (Linux-Xbox)
     Y(bool),
     Z(bool),
     LeftBumper(bool),
