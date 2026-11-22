@@ -134,6 +134,6 @@ impl AbstractVirtualController for VirtualController {
     }
 
     fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>> {
-        Ok(vec![]);
+        Ok(vec![])
     }
 }
