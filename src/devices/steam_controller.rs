@@ -272,7 +272,7 @@ impl SteamController {
     fn handle_accel(response: [u8; 6]) -> Vec<DeviceEvent> {
         let (sway, surge, heave) = Self::convert_analog_3d(response);
         vec![DeviceEvent::ButtonPressed(ControllerInput::Accel(
-            surge, sway, heave,
+            sway, surge, heave,
         ))]
     }
 
@@ -280,7 +280,7 @@ impl SteamController {
     fn handle_gyro(response: [u8; 6]) -> Vec<DeviceEvent> {
         let (pitch, roll, yaw) = Self::convert_analog_3d(response);
         vec![DeviceEvent::ButtonPressed(ControllerInput::Gyro(
-            roll, pitch, yaw,
+            pitch, roll, yaw,
         ))]
     }
 

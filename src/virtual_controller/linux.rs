@@ -450,8 +450,14 @@ impl AbstractVirtualController for VirtualController {
                     } as i32,
                 ));
             }
-            ControllerInput::Gyro(_, _, _) => {}
-            ControllerInput::Accel(_, _, _) => {}
+            ControllerInput::Gyro(_, _, _) => {
+                // Input: right handed pitch, roll, yaw
+                // DS4:   right handed pitch, yaw, roll
+            }
+            ControllerInput::Accel(_, _, _) => {
+                // Input: right handed sway, surge, heave
+                // DS4:   right handed sway, heave, surge
+            }
             digital_input => {
                 self.perform_digital_input(digital_input, &mut cevents, &mut mevents);
             }

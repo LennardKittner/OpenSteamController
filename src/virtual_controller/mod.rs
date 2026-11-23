@@ -50,9 +50,9 @@ pub enum ControllerInput {
     RightTrackpad(f32, f32, f32),
     RightTrackpadTouch(bool),
     RightTrackpadClick(bool),
-    /// (roll, pitch, yaw)
+    /// Right handed pitch (x-right), roll (y-forward), yaw (z-up)
     Gyro(f32, f32, f32),
-    /// (surge, sway, heave)
+    /// Right handed sway (x-right), surge (y-forward), heave (z-up)
     Accel(f32, f32, f32),
     Ignore,
 }
