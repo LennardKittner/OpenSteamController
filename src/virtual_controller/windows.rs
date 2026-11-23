@@ -2,7 +2,7 @@ use std::{ops::Neg, time::Duration};
 
 use vigem_client::{Client, Error, XButtons, XGamepad, Xbox360Wired};
 
-use crate::virtual_controller::{AbstractVirtualController, ControllerInput};
+use crate::virtual_controller::{AbstractVirtualController, ControllerInput, ControllerOutput};
 
 /// A virtual controller to send button inputs
 pub struct VirtualController {
@@ -131,5 +131,9 @@ impl AbstractVirtualController for VirtualController {
 
         self.device.update(&self.state)?;
         Ok(())
+    }
+
+    fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>> {
+        Ok(vec![])
     }
 }

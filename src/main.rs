@@ -7,8 +7,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use open_steam_controller::debug_println;
-use open_steam_controller::devices::Controller;
+use open_steam_controller::devices::{Controller, DeviceCommand};
 use open_steam_controller::multi_threading::{self, ControllerReceiver};
+use open_steam_controller::virtual_controller::ControllerOutput;
 
 #[cfg(target_os = "linux")]
 mod status_tray;
@@ -191,6 +192,31 @@ fn controller_handler(
             let _ = device.try_apply(command);
         }
         device_rx.try_update_state(&device.device_properties());
+
+        if let Some(virt_controller) = &mut virt_controller {
+            match virt_controller.recv_output() {
+                Ok(events) => {
+                    for event in events {
+                        match event {
+                            ControllerOutput::Rumble(event) => {
+                                if let Err(e) = device.try_apply(DeviceCommand::Rumble(event)) {
+                                    debug_println!("{e}");
+                                }
+                            }
+                            ControllerOutput::Haptic(event) => {
+                                if let Err(e) = device.try_apply(DeviceCommand::Haptic(event)) {
+                                    debug_println!("{e}");
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug_println!("Error getting controller output: {e}");
+                }
+            }
+        }
+
         run_counter += 1;
         if exit.load(std::sync::atomic::Ordering::Relaxed) {
             return;
