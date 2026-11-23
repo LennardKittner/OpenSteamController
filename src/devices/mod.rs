@@ -7,7 +7,7 @@ use hidapi::{HidApi, HidDevice, HidError};
 use std::{
     collections::HashSet,
     fmt::{Debug, Display},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use thistermination::TerminationFull;
 
@@ -50,13 +50,15 @@ impl Controller {
         }
     }
 
-    pub fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    pub fn active_refresh_state(&mut self) -> Result<Vec<(ControllerInput, Instant)>, DeviceError> {
         match self {
             Controller::Hid(device) => device.active_refresh_state(),
         }
     }
 
-    pub fn passive_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    pub fn passive_refresh_state(
+        &mut self,
+    ) -> Result<Vec<(ControllerInput, Instant)>, DeviceError> {
         match self {
             Controller::Hid(device) => device.passive_refresh_state(),
         }
@@ -646,7 +648,7 @@ pub trait Device {
     /// whether the app should periodically listen for packets from the controllers
     fn allow_passive_refresh(&mut self) -> bool;
 
-    fn wait_for_updates(&mut self, duration: Duration) -> Option<Vec<DeviceEvent>> {
+    fn wait_for_updates(&mut self, duration: Duration) -> Option<(Vec<DeviceEvent>, Instant)> {
         let mut buf = self.get_response_buffer();
         let res = self
             .get_device_state()
@@ -658,7 +660,9 @@ pub trait Device {
             return None;
         }
 
+        let now = Instant::now();
         self.get_event_from_device_response(&buf)
+            .map(|events| (events, now))
     }
 
     fn get_query_packets(&self) -> Vec<Vec<u8>> {
@@ -673,20 +677,20 @@ pub trait Device {
     }
 
     /// Refreshes the state by querying all available information
-    fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    fn active_refresh_state(&mut self) -> Result<Vec<(ControllerInput, Instant)>, DeviceError> {
         let packets = self.get_query_packets();
 
-        let mut pressed_buttons: Vec<ControllerInput> = vec![];
+        let mut pressed_buttons: Vec<(ControllerInput, Instant)> = vec![];
         let mut responded = false;
         for packet in packets.into_iter() {
             self.prepare_write();
             debug_println!("Write packet: {packet:?}");
             self.get_device_state().write_hid_report(&packet)?;
             std::thread::sleep(RESPONSE_DELAY);
-            if let Some(events) = self.wait_for_updates(Duration::from_secs(1)) {
+            if let Some((events, time)) = self.wait_for_updates(Duration::from_secs(1)) {
                 for event in events {
                     match event {
-                        DeviceEvent::ButtonPressed(button) => pressed_buttons.push(button),
+                        DeviceEvent::ButtonPressed(button) => pressed_buttons.push((button, time)),
                         _ => self.get_device_state_mut().update_self_with_event(&event),
                     }
                 }
@@ -709,29 +713,31 @@ pub trait Device {
 
     /// Refreshes the state by listening for events
     /// Only the battery level is actively queried because it is not communicated by the device on its own
-    fn passive_refresh_state(&mut self) -> Result<Vec<ControllerInput>, DeviceError> {
+    fn passive_refresh_state(&mut self) -> Result<Vec<(ControllerInput, Instant)>, DeviceError> {
         let mut pressed_buttons = vec![];
         let nintendo_layout = self
             .get_device_state_mut()
             .device_properties
             .nintendo_layout;
         if self.allow_passive_refresh() {
-            if let Some(events) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
+            if let Some((events, time)) = self.wait_for_updates(PASSIVE_REFRESH_TIME_OUT) {
                 for event in events {
                     match (nintendo_layout, event) {
                         (true, DeviceEvent::ButtonPressed(ControllerInput::A(pressed))) => {
-                            pressed_buttons.push(ControllerInput::B(pressed))
+                            pressed_buttons.push((ControllerInput::B(pressed), time))
                         }
                         (true, DeviceEvent::ButtonPressed(ControllerInput::B(pressed))) => {
-                            pressed_buttons.push(ControllerInput::A(pressed))
+                            pressed_buttons.push((ControllerInput::A(pressed), time))
                         }
                         (true, DeviceEvent::ButtonPressed(ControllerInput::X(pressed))) => {
-                            pressed_buttons.push(ControllerInput::Y(pressed))
+                            pressed_buttons.push((ControllerInput::Y(pressed), time))
                         }
                         (true, DeviceEvent::ButtonPressed(ControllerInput::Y(pressed))) => {
-                            pressed_buttons.push(ControllerInput::X(pressed))
+                            pressed_buttons.push((ControllerInput::X(pressed), time))
                         }
-                        (_, DeviceEvent::ButtonPressed(button)) => pressed_buttons.push(button),
+                        (_, DeviceEvent::ButtonPressed(button)) => {
+                            pressed_buttons.push((button, time))
+                        }
                         (_, DeviceEvent::Command(command)) => self.try_apply(command)?,
                         _ => self.get_device_state_mut().update_self_with_event(&event),
                     }

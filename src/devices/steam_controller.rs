@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, time::Instant};
 
 use crate::{
     debug_println,
@@ -31,10 +31,18 @@ const RESPONSE_CONNECTION_EVENT: u8 = 0x79;
 const BUTTON_LOCATION: Range<usize> = 2..6;
 /// Range in the response containing the triggers
 const TRIGGER_LOCATION: Range<usize> = 6..10;
-/// Range in the response containing the left yoystick
+/// Range in the response containing the joysticks
 const JOYSTICK_LOCATION: Range<usize> = 10..18;
 /// Range in the response containing the trackpads (x y pressure)
 const TRACKPAD_LOCATION: Range<usize> = 18..30;
+/// Range in the response containing the imu time
+const IMU_TIME_LOCATION: Range<usize> = 30..34;
+/// Range in the response containing the accelerometer (sway-right surge-forward heave-up)
+const ACCEL_LOCATION: Range<usize> = 34..40;
+/// Range in the response containing the gyroscope (pitch-back roll-right yaw-left)
+const GYRO_LOCATION: Range<usize> = 40..46;
+/// Range in the response containing the gyroscope quaternion (x y z w)
+// const GYRO_QUAT_LOCATION: Range<usize> = 46..54;
 /// Max value of an analog input
 const ANALOG_MAX: f32 = 0b01111111_11111111 as f32;
 
@@ -220,7 +228,7 @@ impl SteamController {
         (x, y)
     }
 
-    /// Converts six bytes of data into two three between -1.0 and 1.0
+    /// Converts six bytes of data into three axes between -1.0 and 1.0
     fn convert_analog_3d(input: [u8; 6]) -> (f32, f32, f32) {
         let x = Self::convert_analog(input[0..2].try_into().unwrap());
         let y = Self::convert_analog(input[2..4].try_into().unwrap());
@@ -248,7 +256,7 @@ impl SteamController {
         ])
     }
 
-    /// Converts four bytes of data into controller input events for the left and right trackpad
+    /// Converts six bytes of data into controller input events for the left and right trackpad
     fn handle_trackpads(response: [u8; 12]) -> Vec<DeviceEvent> {
         let (left_x, left_y, left_force) =
             Self::convert_analog_3d(response[0..6].try_into().unwrap());
@@ -258,6 +266,22 @@ impl SteamController {
             ControllerInput::LeftTrackpad(left_x, left_y, left_force),
             ControllerInput::RightTrackpad(right_x, right_y, right_force),
         ])
+    }
+
+    /// Converts six bytes of data into controller input events for the accelerometer
+    fn handle_accel(response: [u8; 6]) -> Vec<DeviceEvent> {
+        let (sway, surge, heave) = Self::convert_analog_3d(response);
+        vec![DeviceEvent::ButtonPressed(ControllerInput::Accel(
+            sway, surge, heave,
+        ))]
+    }
+
+    /// Converts six bytes of data into controller input events for the gyroscope
+    fn handle_gyro(response: [u8; 6]) -> Vec<DeviceEvent> {
+        let (pitch, roll, yaw) = Self::convert_analog_3d(response);
+        vec![DeviceEvent::ButtonPressed(ControllerInput::Gyro(
+            pitch, roll, yaw,
+        ))]
     }
 
     fn handle_status(response: &[u8; 16]) -> Vec<DeviceEvent> {
@@ -329,6 +353,7 @@ impl Device for SteamController {
                 ));
             }
             respone if RESPONSE_INPUT_EVENT.contains(&respone) => {
+                let _imu_time = u32::from_le_bytes(response[IMU_TIME_LOCATION].try_into().unwrap());
                 events.append(
                     &mut self.handle_buttons(response[BUTTON_LOCATION].try_into().unwrap()),
                 );
@@ -344,6 +369,12 @@ impl Device for SteamController {
                 ));
                 events.append(&mut SteamController::handle_trackpads(
                     response[TRACKPAD_LOCATION].try_into().unwrap(),
+                ));
+                events.append(&mut SteamController::handle_accel(
+                    response[ACCEL_LOCATION].try_into().unwrap(),
+                ));
+                events.append(&mut SteamController::handle_gyro(
+                    response[GYRO_LOCATION].try_into().unwrap(),
                 ));
             }
             RESPONSE_CONNECTION_EVENT => {
@@ -432,7 +463,9 @@ impl Device for SteamController {
         true
     }
 
-    fn active_refresh_state(&mut self) -> Result<Vec<ControllerInput>, super::DeviceError> {
+    fn active_refresh_state(
+        &mut self,
+    ) -> Result<Vec<(ControllerInput, Instant)>, super::DeviceError> {
         self.get_device_state()
             .write_hid_report(&SteamController::get_disable_lizard_mode_packet())?;
         Ok(Vec::new())

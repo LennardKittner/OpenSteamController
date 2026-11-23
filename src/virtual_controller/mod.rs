@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 pub mod linux;
+use std::time::Instant;
+
 #[cfg(target_os = "linux")]
 #[allow(unused_imports)]
 pub use linux::VirtualController;
@@ -48,6 +50,10 @@ pub enum ControllerInput {
     RightTrackpad(f32, f32, f32),
     RightTrackpadTouch(bool),
     RightTrackpadClick(bool),
+    /// Right handed pitch (x-right), roll (y-forward), yaw (z-up)
+    Gyro(f32, f32, f32),
+    /// Right handed sway (x-right), surge (y-forward), heave (z-up)
+    Accel(f32, f32, f32),
     Ignore,
 }
 
@@ -60,7 +66,7 @@ pub enum ControllerOutput {
 /// Used to implement OS independent virtual controller
 pub trait AbstractVirtualController {
     /// Send a virtual controller input
-    fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()>;
+    fn send_input(&mut self, input: ControllerInput, time: Instant) -> anyhow::Result<()>;
     /// Receive virtual controller output
     fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>>;
 }

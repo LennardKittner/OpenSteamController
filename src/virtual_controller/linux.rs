@@ -1,5 +1,6 @@
 use std::io;
 use std::ops::Neg;
+use std::time::Instant;
 
 use crate::debug_println;
 use crate::devices::{HapticEvent, HapticSide};
@@ -82,8 +83,8 @@ pub struct VirtualController {
     controller: VirtualDevice,
     mouse: VirtualDevice,
     force_feedback_events: Vec<ControllerOutput>,
-    left_trackpad_prev: Option<(f32, f32, f32)>,
-    right_trackpad_prev: Option<(f32, f32, f32)>,
+    left_trackpad_prev: Option<(f32, f32, f32, Instant)>,
+    right_trackpad_prev: Option<(f32, f32, f32, Instant)>,
     mouse_feedback: f32,
 }
 
@@ -197,18 +198,14 @@ impl VirtualController {
             .with_relative_axes(&mouse_axes)?
             .build()?;
 
-        let force_feedback_events = Vec::new();
-        let left_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let right_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let mouse_feedback: f32 = 0.0;
         Ok(Self {
             xinput_mode,
             controller,
             mouse,
-            force_feedback_events,
-            left_trackpad_prev,
-            right_trackpad_prev,
-            mouse_feedback,
+            force_feedback_events: vec![],
+            left_trackpad_prev: None,
+            right_trackpad_prev: None,
+            mouse_feedback: 0.0,
         })
     }
 
@@ -238,7 +235,7 @@ impl VirtualController {
 }
 
 impl AbstractVirtualController for VirtualController {
-    fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
+    fn send_input(&mut self, input: ControllerInput, time: Instant) -> anyhow::Result<()> {
         let mut cevents = Vec::new();
         let mut mevents = Vec::new();
         match input {
@@ -290,7 +287,7 @@ impl AbstractVirtualController for VirtualController {
                 self.mouse_feedback = 0.0;
             }
             ControllerInput::LeftTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.left_trackpad_prev {
+                if let Some((prev_x, prev_y, prev_z, _prev_t)) = self.left_trackpad_prev {
                     let x_diff = x - prev_x;
                     let y_diff = y - prev_y;
                     let _z_diff = z - prev_z;
@@ -301,7 +298,7 @@ impl AbstractVirtualController for VirtualController {
                     // Accumulate fractional output error
                     let x_err = x_diff - (x_out as f32 / WHEEL_SPEED);
                     let y_err = y_diff - (y_out as f32 / WHEEL_SPEED);
-                    self.left_trackpad_prev = Some((x - x_err, y - y_err, z));
+                    self.left_trackpad_prev = Some((x - x_err, y - y_err, z, time));
 
                     if x_out.abs() > 0 || y_out.abs() > 0 {
                         self.force_feedback_events
@@ -325,11 +322,11 @@ impl AbstractVirtualController for VirtualController {
                         y_out * 120,
                     ));
                 } else {
-                    self.left_trackpad_prev = Some((x, y, z));
+                    self.left_trackpad_prev = Some((x, y, z, time));
                 }
             }
             ControllerInput::RightTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.right_trackpad_prev {
+                if let Some((prev_x, prev_y, prev_z, _prev_t)) = self.right_trackpad_prev {
                     let x_diff = x - prev_x;
                     let y_diff = y - prev_y;
                     let _z_diff = z - prev_z;
@@ -340,7 +337,7 @@ impl AbstractVirtualController for VirtualController {
                     // Accumulate fractional output error
                     let x_err = x_diff - (x_out as f32 / MOUSE_SPEED);
                     let y_err = y_diff - (y_out as f32 / MOUSE_SPEED);
-                    self.right_trackpad_prev = Some((x - x_err, y - y_err, z));
+                    self.right_trackpad_prev = Some((x - x_err, y - y_err, z, time));
 
                     let mouse_dist =
                         ((x_out as f32 * x_out as f32) + (y_out as f32 * y_out as f32)).sqrt();
@@ -369,7 +366,7 @@ impl AbstractVirtualController for VirtualController {
                         y_out,
                     ));
                 } else {
-                    self.right_trackpad_prev = Some((x, y, z));
+                    self.right_trackpad_prev = Some((x, y, z, time));
                 }
             }
             ControllerInput::RightTrackpadClick(pressed) => {
@@ -452,6 +449,14 @@ impl AbstractVirtualController for VirtualController {
                         0f32
                     } as i32,
                 ));
+            }
+            ControllerInput::Gyro(_, _, _) => {
+                // Input: right handed pitch, roll, yaw
+                // DS4:   right handed pitch, yaw, roll
+            }
+            ControllerInput::Accel(_, _, _) => {
+                // Input: right handed sway, surge, heave
+                // DS4:   right handed sway, heave, surge
             }
             digital_input => {
                 self.perform_digital_input(digital_input, &mut cevents, &mut mevents);

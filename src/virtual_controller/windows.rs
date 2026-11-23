@@ -1,4 +1,4 @@
-use std::{ops::Neg, time::Duration};
+use std::{ops::Neg, time::Duration, time::Instant};
 
 use vigem_client::{Client, Error, XButtons, XGamepad, Xbox360Wired};
 
@@ -75,7 +75,7 @@ impl VirtualController {
 }
 
 impl AbstractVirtualController for VirtualController {
-    fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
+    fn send_input(&mut self, input: ControllerInput, _time: Instant) -> anyhow::Result<()> {
         match input {
             ControllerInput::LeftTrackpad(_, _, _) => {
                 return Ok(());
