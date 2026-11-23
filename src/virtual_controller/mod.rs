@@ -1,5 +1,7 @@
 #[cfg(target_os = "linux")]
 pub mod linux;
+use std::time::Instant;
+
 #[cfg(target_os = "linux")]
 #[allow(unused_imports)]
 pub use linux::VirtualController;
@@ -64,7 +66,7 @@ pub enum ControllerOutput {
 /// Used to implement OS independent virtual controller
 pub trait AbstractVirtualController {
     /// Send a virtual controller input
-    fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()>;
+    fn send_input(&mut self, input: ControllerInput, time: Instant) -> anyhow::Result<()>;
     /// Receive virtual controller output
     fn recv_output(&mut self) -> anyhow::Result<Vec<ControllerOutput>>;
 }

@@ -173,9 +173,9 @@ fn controller_handler(
                     }
                 }
 
-                for (input_event, _time) in input_events {
+                for (input_event, time) in input_events {
                     if let Some(virt_controller) = &mut virt_controller {
-                        if let Err(e) = virt_controller.send_input(input_event) {
+                        if let Err(e) = virt_controller.send_input(input_event, time) {
                             debug_println!("{e}");
                         }
                     }
