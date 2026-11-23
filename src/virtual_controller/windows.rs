@@ -1,4 +1,4 @@
-use std::{ops::Neg, time::Duration};
+use std::{ops::Neg, time::Duration, time::Instant};
 
 use vigem_client::{Client, Error, XButtons, XGamepad, Xbox360Wired};
 
