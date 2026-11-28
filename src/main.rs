@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use open_steam_controller::debug_println;
 use open_steam_controller::devices::{Controller, DeviceCommand};
+use open_steam_controller::layout::{self, LayoutState, MappedOutput};
 use open_steam_controller::multi_threading::{self, ControllerReceiver};
 use open_steam_controller::virtual_controller::ControllerOutput;
 
@@ -150,6 +151,7 @@ fn controller_handler(
 ) {
     use open_steam_controller::virtual_controller::{AbstractVirtualController, VirtualController};
     let mut virt_controller: Option<VirtualController> = None;
+    let mut state = LayoutState::new();
     // Run loop
     let mut run_counter = 0;
     loop {
@@ -158,7 +160,7 @@ fn controller_handler(
         } else {
             device.passive_refresh_state()
         } {
-            Ok(input_events) => {
+            Ok(device_outputs) => {
                 // Let the virtual controllers connection state mirror the real
                 // controller
                 if device.device_properties().connected == Some(false) && virt_controller.is_some()
@@ -168,22 +170,40 @@ fn controller_handler(
                     && virt_controller.is_none()
                 {
                     match VirtualController::new(xinput_mode) {
-                        Ok(vc) => virt_controller = Some(vc),
+                        Ok(vc) => {
+                            virt_controller = Some(vc);
+                            state = LayoutState::new();
+                        }
                         Err(e) => eprintln!("Failed to create virtual controller {e}"),
                     }
                 }
 
-                for input_event in input_events {
-                    if let Some(virt_controller) = &mut virt_controller {
-                        if let Err(e) = virt_controller.send_input(input_event) {
-                            debug_println!("{e}");
+                let props = device.device_properties();
+                if let Some(virt_controller) = &mut virt_controller {
+                    for device_output in device_outputs {
+                        for layout_output in
+                            layout::map_device_output(&mut state, device_output, &props)
+                        {
+                            match layout_output {
+                                MappedOutput::Controller(controller_input) => {
+                                    if let Err(e) = virt_controller.send_input(controller_input) {
+                                        debug_println!("{e}");
+                                    }
+                                }
+                                MappedOutput::Device(command) => {
+                                    if let Err(e) = device.try_apply(command) {
+                                        debug_println!("{e}");
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
             Err(error) => {
-                device.device_properties().connected = None;
-                device_rx.try_update_state(&device.device_properties());
+                let mut props = device.device_properties();
+                props.connected = None;
+                device_rx.try_update_state(&props);
                 eprintln!("{error}");
                 return;
             }
