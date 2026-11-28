@@ -203,6 +203,16 @@ impl VirtualController {
         mouse_keys.insert(KeyCode::BTN_LEFT);
         mouse_keys.insert(KeyCode::BTN_MIDDLE);
         mouse_keys.insert(KeyCode::BTN_RIGHT);
+        mouse_keys.insert(KeyCode::KEY_ENTER);
+        mouse_keys.insert(KeyCode::KEY_ESC);
+        mouse_keys.insert(KeyCode::KEY_LEFTCTRL);
+        mouse_keys.insert(KeyCode::KEY_LEFTSHIFT);
+        mouse_keys.insert(KeyCode::KEY_LEFTALT);
+        mouse_keys.insert(KeyCode::KEY_LEFTMETA);
+        mouse_keys.insert(KeyCode::KEY_UP);
+        mouse_keys.insert(KeyCode::KEY_DOWN);
+        mouse_keys.insert(KeyCode::KEY_LEFT);
+        mouse_keys.insert(KeyCode::KEY_RIGHT);
         let mut mouse_axes = AttributeSet::<RelativeAxisCode>::new();
         mouse_axes.insert(RelativeAxisCode::REL_X);
         mouse_axes.insert(RelativeAxisCode::REL_Y);
