@@ -2,10 +2,16 @@
 pub mod linux;
 #[cfg(target_os = "linux")]
 #[allow(unused_imports)]
+pub use linux::EmulatedDevice;
+#[cfg(target_os = "linux")]
+#[allow(unused_imports)]
 pub use linux::VirtualController;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+#[cfg(target_os = "windows")]
+#[allow(unused_imports)]
+pub use windows::EmulatedDevice;
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
 pub use windows::VirtualController;

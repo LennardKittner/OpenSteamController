@@ -1,8 +1,27 @@
-use std::{ops::Neg, time::Duration};
+use std::{ops::Neg, str::FromStr, time::Duration};
 
 use vigem_client::{Client, Error, XButtons, XGamepad, Xbox360Wired};
 
 use crate::virtual_controller::{AbstractVirtualController, ControllerInput, ControllerOutput};
+
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub enum EmulatedDevice {
+    #[default]
+    Xbox360,
+}
+
+impl FromStr for EmulatedDevice {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "x360" => Ok(Xbox360),
+            "xbox360" => Ok(Xbox360),
+
+            _ => return Err("Unknow device name"),
+        }
+    }
+}
 
 /// A virtual controller to send button inputs
 pub struct VirtualController {
@@ -66,9 +85,7 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
 
 impl VirtualController {
     /// create new virtual controller
-    /// The Windows backend always uses XInput, so the parameter is ignored.
-    /// It is kept to maintain the same interface as the Linux backend.
-    pub fn new(_xinput: bool) -> Result<VirtualController, Error> {
+    pub fn new(_emulated: EmulatedDevice) -> Result<VirtualController, Error> {
         let client = vigem_client::Client::connect().unwrap();
         let id = vigem_client::TargetId::XBOX360_WIRED;
         let mut device = vigem_client::Xbox360Wired::new(client, id);

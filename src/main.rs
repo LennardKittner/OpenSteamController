@@ -10,7 +10,7 @@ use open_steam_controller::debug_println;
 use open_steam_controller::devices::{Controller, DeviceCommand};
 use open_steam_controller::layout::{self, LayoutState, MappedOutput};
 use open_steam_controller::multi_threading::{self, ControllerReceiver};
-use open_steam_controller::virtual_controller::ControllerOutput;
+use open_steam_controller::virtual_controller::{ControllerOutput, EmulatedDevice};
 
 #[cfg(target_os = "linux")]
 mod status_tray;
@@ -144,7 +144,7 @@ fn main() {
 /// handles packets from a controller and is responsible for generating virtual controller inputs
 /// the exit atomic is used for termination
 fn controller_handler(
-    xinput_mode: bool,
+    emulated: EmulatedDevice,
     mut device: Controller,
     mut device_rx: ControllerReceiver,
     exit: Arc<AtomicBool>,
@@ -169,7 +169,7 @@ fn controller_handler(
                 } else if device.device_properties().connected == Some(true)
                     && virt_controller.is_none()
                 {
-                    match VirtualController::new(xinput_mode) {
+                    match VirtualController::new(emulated) {
                         Ok(vc) => {
                             virt_controller = Some(vc);
                             state = LayoutState::new();
@@ -282,7 +282,7 @@ fn main() {
                 .short('v')
                 .action(ArgAction::SetTrue)
                 .required(false)
-                .help("Use verbose output "),
+                .help("Use verbose output"),
         )
         .arg(
             Arg::new("monochrome_icons")
@@ -292,17 +292,20 @@ fn main() {
                 .help("Use the symbolic (monochrome) variants of the system tray icons"),
         )
         .arg(
-            Arg::new("xinput_mode")
-                .long("xinput-mode")
-                .short('x')
-                .action(ArgAction::SetTrue)
+            Arg::new("emulate")
+                .long("emulate")
+                .short('e')
+                .value_name("CONTROLLER")
+                .value_parser(clap::value_parser!(EmulatedDevice))
+                .num_args(1)
+                .action(ArgAction::Set)
                 .required(false)
-                .help("Enable xinput mode, which reduces the number of virtual buttons"),
+                .help("Which device should the virtual controller emulate"),
         )
         .get_matches();
 
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
-    let xinput_mode = matches.get_flag("xinput_mode");
+    let emulated_device = matches.get_one("emulate").map(|e| *e).unwrap_or_default();
     let monochrome_icons = matches.get_flag("monochrome_icons");
 
     let (tx, rx) = mpsc::channel();
@@ -330,7 +333,7 @@ fn main() {
                 let local_exit = exit.clone();
                 (
                     std::thread::spawn(move || {
-                        controller_handler(xinput_mode, device, device_rx, local_exit);
+                        controller_handler(emulated_device, device, device_rx, local_exit);
                     }),
                     device_tx,
                 )
