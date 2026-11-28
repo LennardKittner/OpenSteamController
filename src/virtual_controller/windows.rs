@@ -15,10 +15,10 @@ impl FromStr for EmulatedDevice {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "x360" => Ok(Xbox360),
-            "xbox360" => Ok(Xbox360),
+            "x360" => Ok(Self::Xbox360),
+            "xbox360" => Ok(Self::Xbox360),
 
-            _ => return Err("Unknow device name"),
+            _ => return Err("Unknow device name, expected 'x360', or 'xbox360'"),
         }
     }
 }
@@ -62,7 +62,7 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
         ControllerInput::Start(set) => bit_flag_helper(set, XButtons::START, current_buttons),
         ControllerInput::Select(set) => bit_flag_helper(set, XButtons::BACK, current_buttons),
         ControllerInput::Mode(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
-        ControllerInput::Menu(set) => current_buttons,
+        ControllerInput::Menu(_) => current_buttons,
 
         ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
         ControllerInput::LeftTriggerClick(_) => current_buttons,
