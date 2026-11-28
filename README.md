@@ -63,12 +63,20 @@ A tray application providing extended support for the Steam Controller (2026) wi
 Usage: open-steam-controller [OPTIONS]
 
 Options:
-  -v, --verbose           Use verbose output
-      --monochrome-icons  Use the symbolic (monochrome) variants of the system tray icons
-  -x, --xinput-mode       Enable xinput mode, which reduces the number of virtual buttons
-  -h, --help              Print help
-  -V, --version           Print version
+  -v, --verbose               Use verbose output
+      --monochrome-icons      Use the symbolic (monochrome) variants of the system tray icons
+  -e, --emulate <CONTROLLER>  Which device should the virtual controller emulate
+  -h, --help                  Print help
+  -V, --version               Print version
 ```
+
+| Emulated controller | `<CONTROLLER>` | Windows | Linux | D-pad hat | D-pad buttons | Trigger buttons | Paddles |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Default | | Xbox 360 | Xbox One Elite |
+| Xbox 360 | `x360` or `xbox360` | &check; | &check; | &check; | &cross; | &cross; | &cross; |
+| Xbox One Elite | `xbe` or `xboxelite` | &cross; | &check; | &check; | &check; | &check; | &check; |
+| DualShock 4 | `ds4` or `dualshock4` | &cross; | &check; | &check; | &check; | &check; | &cross; |
+| DualSense Edge | `dse` or `dualsenseedge` | &cross; | &check; | &check; | &check; | &check; | &check; |
 
 ### 1. Requirements
 

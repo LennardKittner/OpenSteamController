@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use open_steam_controller::debug_println;
 use open_steam_controller::devices::{Controller, DeviceCommand};
+use open_steam_controller::layout::{self, LayoutState, MappedOutput};
 use open_steam_controller::multi_threading::{self, ControllerReceiver};
-use open_steam_controller::virtual_controller::ControllerOutput;
+use open_steam_controller::virtual_controller::{ControllerOutput, EmulatedDevice};
 
 #[cfg(target_os = "linux")]
 mod status_tray;
@@ -86,8 +87,13 @@ fn main() {
                     let local_exit = exit.clone();
                     (
                         std::thread::spawn(move || {
-                            // Windows always uses xinput mode
-                            controller_handler(true, device, device_rx, local_exit);
+                            // Windows always uses Xbox360 ("XInput mode")
+                            controller_handler(
+                                EmulatedDevice::Xbox360,
+                                device,
+                                device_rx,
+                                local_exit,
+                            );
                         }),
                         device_tx,
                     )
@@ -143,13 +149,14 @@ fn main() {
 /// handles packets from a controller and is responsible for generating virtual controller inputs
 /// the exit atomic is used for termination
 fn controller_handler(
-    xinput_mode: bool,
+    emulated: EmulatedDevice,
     mut device: Controller,
     mut device_rx: ControllerReceiver,
     exit: Arc<AtomicBool>,
 ) {
     use open_steam_controller::virtual_controller::{AbstractVirtualController, VirtualController};
     let mut virt_controller: Option<VirtualController> = None;
+    let mut state = LayoutState::new();
     // Run loop
     let mut run_counter = 0;
     loop {
@@ -158,7 +165,7 @@ fn controller_handler(
         } else {
             device.passive_refresh_state()
         } {
-            Ok(input_events) => {
+            Ok(device_outputs) => {
                 // Let the virtual controllers connection state mirror the real
                 // controller
                 if device.device_properties().connected == Some(false) && virt_controller.is_some()
@@ -167,23 +174,41 @@ fn controller_handler(
                 } else if device.device_properties().connected == Some(true)
                     && virt_controller.is_none()
                 {
-                    match VirtualController::new(xinput_mode) {
-                        Ok(vc) => virt_controller = Some(vc),
+                    match VirtualController::new(emulated) {
+                        Ok(vc) => {
+                            virt_controller = Some(vc);
+                            state = LayoutState::new();
+                        }
                         Err(e) => eprintln!("Failed to create virtual controller {e}"),
                     }
                 }
 
-                for input_event in input_events {
-                    if let Some(virt_controller) = &mut virt_controller {
-                        if let Err(e) = virt_controller.send_input(input_event) {
-                            debug_println!("{e}");
+                let props = device.device_properties();
+                if let Some(virt_controller) = &mut virt_controller {
+                    for device_output in device_outputs {
+                        for layout_output in
+                            layout::map_device_output(&mut state, device_output, &props)
+                        {
+                            match layout_output {
+                                MappedOutput::Controller(controller_input) => {
+                                    if let Err(e) = virt_controller.send_input(controller_input) {
+                                        debug_println!("{e}");
+                                    }
+                                }
+                                MappedOutput::Device(command) => {
+                                    if let Err(e) = device.try_apply(command) {
+                                        debug_println!("{e}");
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
             Err(error) => {
-                device.device_properties().connected = None;
-                device_rx.try_update_state(&device.device_properties());
+                let mut props = device.device_properties();
+                props.connected = None;
+                device_rx.try_update_state(&props);
                 eprintln!("{error}");
                 return;
             }
@@ -262,7 +287,7 @@ fn main() {
                 .short('v')
                 .action(ArgAction::SetTrue)
                 .required(false)
-                .help("Use verbose output "),
+                .help("Use verbose output"),
         )
         .arg(
             Arg::new("monochrome_icons")
@@ -272,17 +297,20 @@ fn main() {
                 .help("Use the symbolic (monochrome) variants of the system tray icons"),
         )
         .arg(
-            Arg::new("xinput_mode")
-                .long("xinput-mode")
-                .short('x')
-                .action(ArgAction::SetTrue)
+            Arg::new("emulate")
+                .long("emulate")
+                .short('e')
+                .value_name("CONTROLLER")
+                .value_parser(clap::value_parser!(EmulatedDevice))
+                .num_args(1)
+                .action(ArgAction::Set)
                 .required(false)
-                .help("Enable xinput mode, which reduces the number of virtual buttons"),
+                .help("Which device should the virtual controller emulate"),
         )
         .get_matches();
 
     VERBOSE.set(matches.get_flag("verbose")).unwrap();
-    let xinput_mode = matches.get_flag("xinput_mode");
+    let emulated_device = matches.get_one("emulate").map(|e| *e).unwrap_or_default();
     let monochrome_icons = matches.get_flag("monochrome_icons");
 
     let (tx, rx) = mpsc::channel();
@@ -310,7 +338,7 @@ fn main() {
                 let local_exit = exit.clone();
                 (
                     std::thread::spawn(move || {
-                        controller_handler(xinput_mode, device, device_rx, local_exit);
+                        controller_handler(emulated_device, device, device_rx, local_exit);
                     }),
                     device_tx,
                 )

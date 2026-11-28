@@ -1,8 +1,6 @@
-use std::io;
-use std::ops::Neg;
+use std::{io, ops::Neg, str::FromStr};
 
 use crate::debug_println;
-use crate::devices::{HapticEvent, HapticSide};
 use crate::virtual_controller::{AbstractVirtualController, ControllerInput, ControllerOutput};
 use evdev::uinput::VirtualDevice;
 use evdev::{
@@ -10,95 +8,103 @@ use evdev::{
     RelativeAxisCode, UinputAbsSetup,
 };
 
-/// Xbox series x
-const PRODUCT_ID: u16 = 0x0b12;
-/// Xbox 360
-const PRODUCT_ID_XINPUT: u16 = 0x028e;
-/// Microsoft
-const VENDOR_ID: u16 = 0x045e;
-/// Name of the controller
-const NAME: &str = "Xbox Controller";
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub enum EmulatedDevice {
+    Xbox360,
+    #[default]
+    XboxElite,
+    DualShock4,
+    DualSenseEdge,
+}
+
+impl FromStr for EmulatedDevice {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "x360" => Ok(Self::Xbox360),
+            "xbox360" => Ok(Self::Xbox360),
+
+            "xbe" => Ok(Self::XboxElite),
+            "xboxelite" => Ok(Self::XboxElite),
+
+            "ds4" => Ok(Self::DualShock4),
+            "dualshock4" => Ok(Self::DualShock4),
+
+            "dse" => Ok(Self::DualSenseEdge),
+            "dualsenseedge" => Ok(Self::DualSenseEdge),
+
+            _ => return Err("Unknown device name, expected 'x360', 'xbox360', 'xbe', 'xboxelite', 'ds4', 'dualshock4', 'dse', or 'dualsenseedge'"),
+        }
+    }
+}
+
+const VENDOR_ID_MICROSOFT: u16 = 0x045e;
+const PRODUCT_ID_XBOX_360: u16 = 0x028e;
+const PRODUCT_ID_XBOX_ONE_ELITE: u16 = 0x02e3;
+const PRODUCT_NAME_XBOX_360: &str = "Xbox 360 Controller";
+const PRODUCT_NAME_XBOX_ONE_ELITE: &str = "Xbox One Elite Controller";
+
+const VENDOR_ID_SONY: u16 = 0x054c;
+const PRODUCT_ID_DUALSHOCK_4: u16 = 0x09cc;
+const PRODUCT_ID_DUALSENSE_EDGE: u16 = 0x0df2;
+const PRODUCT_NAME_DUALSHOCK_4: &str = "PS4 Controller";
+const PRODUCT_NAME_DUALSENSE_EDGE: &str = "DualSense Edge Controller";
+
+fn emulated_device_info(device: EmulatedDevice) -> (u16, u16, &'static str) {
+    match device {
+        EmulatedDevice::Xbox360 => (
+            VENDOR_ID_MICROSOFT,
+            PRODUCT_ID_XBOX_360,
+            PRODUCT_NAME_XBOX_360,
+        ),
+        EmulatedDevice::XboxElite => (
+            VENDOR_ID_MICROSOFT,
+            PRODUCT_ID_XBOX_ONE_ELITE,
+            PRODUCT_NAME_XBOX_ONE_ELITE,
+        ),
+        EmulatedDevice::DualShock4 => (
+            VENDOR_ID_SONY,
+            PRODUCT_ID_DUALSHOCK_4,
+            PRODUCT_NAME_DUALSHOCK_4,
+        ),
+        EmulatedDevice::DualSenseEdge => (
+            VENDOR_ID_SONY,
+            PRODUCT_ID_DUALSENSE_EDGE,
+            PRODUCT_NAME_DUALSENSE_EDGE,
+        ),
+    }
+}
 
 /// Name of the virtual mouse
 const MOUSE_NAME: &str = "Steam Controller virtual mouse";
-
-/// map generic controller input the the uinput specific events
-/// returns the controller input event and a bool specifying whether the input is pressed or
-/// released
-///
-/// Panics if the input is analog
-fn map_digital_controller_input(
-    xinput_mode: bool,
-    input: ControllerInput,
-) -> Option<(KeyCode, bool)> {
-    Some(match (xinput_mode, input) {
-        (_, ControllerInput::A(pressed)) => (KeyCode::BTN_SOUTH, pressed),
-        (_, ControllerInput::B(pressed)) => (KeyCode::BTN_EAST, pressed),
-        (false, ControllerInput::C(pressed)) => (KeyCode::BTN_C, pressed),
-        // Mapping bug: the Linux kernel defines BTN_A/B/X/Y as aliases for
-        // BTN_SOUTH/EAST/NORTH/WEST:
-        //  X
-        // Y B
-        //  A
-        // However, this is *not* the same as the Xbox layout:
-        //  Y
-        // X B
-        //  A
-        // Despite this, it would seem most default mappings assume the
-        // Xbox layout *is* the same as the Linux layout, meaning we need to
-        // deliberately reverse X and Y for as long as we pretend to be an
-        // Xbox controller.
-        (_, ControllerInput::X(pressed)) => (KeyCode::BTN_NORTH, pressed),
-        (_, ControllerInput::Y(pressed)) => (KeyCode::BTN_WEST, pressed),
-        (false, ControllerInput::Z(pressed)) => (KeyCode::BTN_Z, pressed),
-        (_, ControllerInput::LeftBumper(pressed)) => (KeyCode::BTN_TL, pressed),
-        (_, ControllerInput::RightBumper(pressed)) => (KeyCode::BTN_TR, pressed),
-        (_, ControllerInput::Select(pressed)) => (KeyCode::BTN_SELECT, pressed),
-        (_, ControllerInput::Start(pressed)) => (KeyCode::BTN_START, pressed),
-        (false, ControllerInput::Mode(pressed)) => (KeyCode::BTN_MODE, pressed),
-        (_, ControllerInput::LeftThumb(pressed)) => (KeyCode::BTN_THUMBL, pressed),
-        (_, ControllerInput::RightThumb(pressed)) => (KeyCode::BTN_THUMBR, pressed),
-        (false, ControllerInput::Menu(pressed)) => (KeyCode::BTN_MODE, pressed),
-        (false, ControllerInput::Home(pressed)) => (KeyCode::BTN_MODE, pressed),
-        (false, ControllerInput::Up(pressed)) => (KeyCode::BTN_DPAD_UP, pressed),
-        (false, ControllerInput::Down(pressed)) => (KeyCode::BTN_DPAD_DOWN, pressed),
-        (false, ControllerInput::Left(pressed)) => (KeyCode::BTN_DPAD_LEFT, pressed),
-        (false, ControllerInput::Right(pressed)) => (KeyCode::BTN_DPAD_RIGHT, pressed),
-        _ => return None,
-    })
-}
-
-fn map_digital_mouse_input(input: ControllerInput) -> Option<(KeyCode, bool)> {
-    #[allow(unreachable_code)]
-    Some(match input {
-        // TODO
-        _ => return None,
-    })
-}
-
-/// A virtual controller to send button inputs
-pub struct VirtualController {
-    xinput_mode: bool,
-    controller: VirtualDevice,
-    mouse: VirtualDevice,
-    force_feedback_events: Vec<ControllerOutput>,
-    left_trackpad_prev: Option<(f32, f32, f32)>,
-    right_trackpad_prev: Option<(f32, f32, f32)>,
-    mouse_feedback: f32,
-}
 
 /// Stick all the way in one direction
 const STICK_MIN: i32 = -32768;
 /// Stick all the way in the other direction
 const STICK_MAX: i32 = 32767;
+
+fn map_stick(val: f32) -> i32 {
+    if val.is_sign_positive() {
+        (val * (STICK_MAX as f32)) as i32
+    } else {
+        (val.neg() * (STICK_MIN as f32)) as i32
+    }
+}
+
 /// Trigger pressed down
 const TRIGGER_MAX: i32 = 255;
 
-// const FORCEFEEDBACK_MAX: u32 = 16;
+fn map_trigger(force: f32) -> i32 {
+    if force.is_sign_positive() {
+        (force * (TRIGGER_MAX as f32)) as i32
+    } else {
+        0i32
+    }
+}
 
-const MOUSE_SPEED: f32 = 256.0;
-const MOUSE_FEEDBACK_MAX: f32 = MOUSE_SPEED / 4.0;
-const WHEEL_SPEED: f32 = -64.0;
+/// When using REL_(H)WHEEL_HI_RES, 120 is a complete line
+const SMOOTH_WHEEL_MULTIPLIER: i32 = 120;
 
 const HAT_NONE: i32 = 0;
 const HAT_LEFT: i32 = -1;
@@ -106,9 +112,222 @@ const HAT_RIGHT: i32 = 1;
 const HAT_UP: i32 = -1;
 const HAT_DOWN: i32 = 1;
 
+// Missing from evdev-0.13.2
+const BTN_GRIPL: u16 = 0x224;
+const BTN_GRIPR: u16 = 0x225;
+const BTN_GRIPL2: u16 = 0x226;
+const BTN_GRIPR2: u16 = 0x227;
+
+fn map_absolute_controller_input(
+    device: EmulatedDevice,
+    input: ControllerInput,
+) -> Option<(AbsoluteAxisCode, i32)> {
+    Some(match (device, input) {
+        (_, ControllerInput::Up(pressed)) => (
+            AbsoluteAxisCode::ABS_HAT0Y,
+            if pressed { HAT_UP } else { HAT_NONE },
+        ),
+        (_, ControllerInput::Down(pressed)) => (
+            AbsoluteAxisCode::ABS_HAT0Y,
+            if pressed { HAT_DOWN } else { HAT_NONE },
+        ),
+        (_, ControllerInput::Left(pressed)) => (
+            AbsoluteAxisCode::ABS_HAT0X,
+            if pressed { HAT_LEFT } else { HAT_NONE },
+        ),
+        (_, ControllerInput::Right(pressed)) => (
+            AbsoluteAxisCode::ABS_HAT0X,
+            if pressed { HAT_RIGHT } else { HAT_NONE },
+        ),
+
+        (EmulatedDevice::DualShock4, ControllerInput::LeftTrigger(force)) => {
+            (AbsoluteAxisCode::ABS_RX, map_trigger(force))
+        }
+        (EmulatedDevice::DualShock4, ControllerInput::RightTrigger(force)) => {
+            (AbsoluteAxisCode::ABS_RY, map_trigger(force))
+        }
+
+        (_, ControllerInput::LeftTrigger(force)) => (AbsoluteAxisCode::ABS_Z, map_trigger(force)),
+        (_, ControllerInput::RightTrigger(force)) => (AbsoluteAxisCode::ABS_RZ, map_trigger(force)),
+
+        _ => return None,
+    })
+}
+
+fn map_absolute_controller_input_2d(
+    device: EmulatedDevice,
+    input: ControllerInput,
+) -> Option<((AbsoluteAxisCode, i32), (AbsoluteAxisCode, i32))> {
+    Some(match (device, input) {
+        (_, ControllerInput::LeftJoyStick(x, y)) => (
+            (AbsoluteAxisCode::ABS_X, map_stick(x)),
+            (AbsoluteAxisCode::ABS_Y, map_stick(y.neg())),
+        ),
+        (EmulatedDevice::DualShock4, ControllerInput::RightJoyStick(x, y)) => (
+            (AbsoluteAxisCode::ABS_Z, map_stick(x)),
+            (AbsoluteAxisCode::ABS_RZ, map_stick(y.neg())),
+        ),
+        (_, ControllerInput::RightJoyStick(x, y)) => (
+            (AbsoluteAxisCode::ABS_RX, map_stick(x)),
+            (AbsoluteAxisCode::ABS_RY, map_stick(y.neg())),
+        ),
+
+        _ => return None,
+    })
+}
+
+/// map generic controller input the the uinput specific events
+/// returns the controller input event and a bool specifying whether the input is pressed or
+/// released
+fn map_digital_controller_input(
+    device: EmulatedDevice,
+    input: ControllerInput,
+) -> Option<(KeyCode, bool)> {
+    Some(match device {
+        EmulatedDevice::Xbox360 => match input {
+            ControllerInput::A(pressed) => (KeyCode::BTN_SOUTH, pressed),
+            ControllerInput::B(pressed) => (KeyCode::BTN_EAST, pressed),
+            ControllerInput::X(pressed) => (KeyCode::BTN_NORTH, pressed),
+            ControllerInput::Y(pressed) => (KeyCode::BTN_WEST, pressed),
+
+            ControllerInput::Start(pressed) => (KeyCode::BTN_START, pressed),
+            ControllerInput::Select(pressed) => (KeyCode::BTN_SELECT, pressed),
+
+            ControllerInput::LeftBumper(pressed) => (KeyCode::BTN_TL, pressed),
+            ControllerInput::LeftThumb(pressed) => (KeyCode::BTN_THUMBL, pressed),
+
+            ControllerInput::RightBumper(pressed) => (KeyCode::BTN_TR, pressed),
+            ControllerInput::RightThumb(pressed) => (KeyCode::BTN_THUMBR, pressed),
+
+            _ => return None,
+        },
+
+        EmulatedDevice::XboxElite => match input {
+            ControllerInput::A(pressed) => (KeyCode::BTN_SOUTH, pressed),
+            ControllerInput::B(pressed) => (KeyCode::BTN_EAST, pressed),
+            ControllerInput::X(pressed) => (KeyCode::BTN_NORTH, pressed),
+            ControllerInput::Y(pressed) => (KeyCode::BTN_WEST, pressed),
+
+            ControllerInput::Up(pressed) => (KeyCode::BTN_DPAD_UP, pressed),
+            ControllerInput::Down(pressed) => (KeyCode::BTN_DPAD_DOWN, pressed),
+            ControllerInput::Left(pressed) => (KeyCode::BTN_DPAD_LEFT, pressed),
+            ControllerInput::Right(pressed) => (KeyCode::BTN_DPAD_RIGHT, pressed),
+
+            ControllerInput::Start(pressed) => (KeyCode::BTN_START, pressed),
+            ControllerInput::Select(pressed) => (KeyCode::BTN_SELECT, pressed),
+            ControllerInput::Mode(pressed) => (KeyCode::BTN_MODE, pressed),
+
+            ControllerInput::LeftBumper(pressed) => (KeyCode::BTN_TL, pressed),
+            ControllerInput::LeftTriggerClick(pressed) => (KeyCode::BTN_TL2, pressed),
+            ControllerInput::LeftThumb(pressed) => (KeyCode::BTN_THUMBL, pressed),
+
+            ControllerInput::RightBumper(pressed) => (KeyCode::BTN_TR, pressed),
+            ControllerInput::RightTriggerClick(pressed) => (KeyCode::BTN_TR2, pressed),
+            ControllerInput::RightThumb(pressed) => (KeyCode::BTN_THUMBR, pressed),
+
+            ControllerInput::LeftGrip1(pressed) => (KeyCode(BTN_GRIPL), pressed),
+            ControllerInput::LeftGrip2(pressed) => (KeyCode(BTN_GRIPL2), pressed),
+            ControllerInput::RightGrip1(pressed) => (KeyCode(BTN_GRIPR), pressed),
+            ControllerInput::RightGrip2(pressed) => (KeyCode(BTN_GRIPR2), pressed),
+
+            _ => return None,
+        },
+
+        EmulatedDevice::DualShock4 => match input {
+            ControllerInput::A(pressed) => (KeyCode::BTN_EAST, pressed),
+            ControllerInput::B(pressed) => (KeyCode::BTN_NORTH, pressed),
+            ControllerInput::X(pressed) => (KeyCode::BTN_SOUTH, pressed),
+            ControllerInput::Y(pressed) => (KeyCode::BTN_WEST, pressed),
+
+            ControllerInput::Up(pressed) => (KeyCode::BTN_DPAD_UP, pressed),
+            ControllerInput::Down(pressed) => (KeyCode::BTN_DPAD_DOWN, pressed),
+            ControllerInput::Left(pressed) => (KeyCode::BTN_DPAD_LEFT, pressed),
+            ControllerInput::Right(pressed) => (KeyCode::BTN_DPAD_RIGHT, pressed),
+
+            ControllerInput::Start(pressed) => (KeyCode::BTN_START, pressed),
+            ControllerInput::Select(pressed) => (KeyCode::BTN_SELECT, pressed),
+            ControllerInput::Mode(pressed) => (KeyCode::BTN_THUMBR, pressed),
+
+            ControllerInput::LeftBumper(pressed) => (KeyCode::BTN_TL, pressed),
+            ControllerInput::LeftTriggerClick(pressed) => (KeyCode::BTN_TL2, pressed),
+            ControllerInput::LeftThumb(pressed) => (KeyCode::BTN_MODE, pressed),
+
+            ControllerInput::RightBumper(pressed) => (KeyCode::BTN_TR, pressed),
+            ControllerInput::RightTriggerClick(pressed) => (KeyCode::BTN_TR2, pressed),
+            ControllerInput::RightThumb(pressed) => (KeyCode::BTN_THUMBL, pressed),
+
+            _ => return None,
+        },
+
+        EmulatedDevice::DualSenseEdge => match input {
+            ControllerInput::A(pressed) => (KeyCode::BTN_SOUTH, pressed),
+            ControllerInput::B(pressed) => (KeyCode::BTN_EAST, pressed),
+            ControllerInput::X(pressed) => (KeyCode::BTN_WEST, pressed),
+            ControllerInput::Y(pressed) => (KeyCode::BTN_NORTH, pressed),
+
+            ControllerInput::Up(pressed) => (KeyCode::BTN_DPAD_UP, pressed),
+            ControllerInput::Down(pressed) => (KeyCode::BTN_DPAD_DOWN, pressed),
+            ControllerInput::Left(pressed) => (KeyCode::BTN_DPAD_LEFT, pressed),
+            ControllerInput::Right(pressed) => (KeyCode::BTN_DPAD_RIGHT, pressed),
+
+            ControllerInput::Start(pressed) => (KeyCode::BTN_START, pressed),
+            ControllerInput::Select(pressed) => (KeyCode::BTN_SELECT, pressed),
+            ControllerInput::Mode(pressed) => (KeyCode::BTN_MODE, pressed),
+
+            ControllerInput::LeftBumper(pressed) => (KeyCode::BTN_TL, pressed),
+            ControllerInput::LeftTriggerClick(pressed) => (KeyCode::BTN_TL2, pressed),
+            ControllerInput::LeftThumb(pressed) => (KeyCode::BTN_THUMBL, pressed),
+
+            ControllerInput::RightBumper(pressed) => (KeyCode::BTN_TR, pressed),
+            ControllerInput::RightTriggerClick(pressed) => (KeyCode::BTN_TR2, pressed),
+            ControllerInput::RightThumb(pressed) => (KeyCode::BTN_THUMBR, pressed),
+
+            ControllerInput::LeftGrip1(pressed) => (KeyCode(BTN_GRIPL), pressed),
+            ControllerInput::LeftGrip2(pressed) => (KeyCode(BTN_GRIPL2), pressed),
+            ControllerInput::RightGrip1(pressed) => (KeyCode(BTN_GRIPR), pressed),
+            ControllerInput::RightGrip2(pressed) => (KeyCode(BTN_GRIPR2), pressed),
+
+            _ => return None,
+        },
+    })
+}
+
+fn map_digital_mouse_input(input: ControllerInput) -> Option<(KeyCode, bool)> {
+    Some(match input {
+        ControllerInput::LeftMouse(pressed) => (KeyCode::BTN_LEFT, pressed),
+        ControllerInput::MiddleMouse(pressed) => (KeyCode::BTN_MIDDLE, pressed),
+        ControllerInput::RightMouse(pressed) => (KeyCode::BTN_RIGHT, pressed),
+
+        ControllerInput::EnterKey(pressed) => (KeyCode::KEY_ENTER, pressed),
+        ControllerInput::EscKey(pressed) => (KeyCode::KEY_ESC, pressed),
+        ControllerInput::CtrlKey(pressed) => (KeyCode::KEY_LEFTCTRL, pressed),
+        ControllerInput::ShiftKey(pressed) => (KeyCode::KEY_LEFTSHIFT, pressed),
+        ControllerInput::AltKey(pressed) => (KeyCode::KEY_LEFTALT, pressed),
+        ControllerInput::MetaKey(pressed) => (KeyCode::KEY_LEFTMETA, pressed),
+
+        ControllerInput::UpKey(pressed) => (KeyCode::KEY_UP, pressed),
+        ControllerInput::DownKey(pressed) => (KeyCode::KEY_DOWN, pressed),
+        ControllerInput::LeftKey(pressed) => (KeyCode::KEY_LEFT, pressed),
+        ControllerInput::RightKey(pressed) => (KeyCode::KEY_RIGHT, pressed),
+
+        _ => return None,
+    })
+}
+
+/// A virtual controller to send button inputs
+pub struct VirtualController {
+    emulation: EmulatedDevice,
+    controller: VirtualDevice,
+    mouse: VirtualDevice,
+    force_feedback_events: Vec<ControllerOutput>,
+    smooth_wheel_error: (f32, f32),
+}
+
 impl VirtualController {
     /// create new virtual controller
-    pub fn new(xinput_mode: bool) -> io::Result<VirtualController> {
+    pub fn new(emulation: EmulatedDevice) -> io::Result<VirtualController> {
+        let (vid, pid, name) = emulated_device_info(emulation);
+
         let mut controller_keys = AttributeSet::<KeyCode>::new();
         controller_keys.insert(KeyCode::BTN_NORTH);
         controller_keys.insert(KeyCode::BTN_EAST);
@@ -120,31 +339,36 @@ impl VirtualController {
         controller_keys.insert(KeyCode::BTN_START);
         controller_keys.insert(KeyCode::BTN_THUMBL);
         controller_keys.insert(KeyCode::BTN_THUMBR);
-        if !xinput_mode {
-            controller_keys.insert(KeyCode::BTN_TL2);
-            controller_keys.insert(KeyCode::BTN_TR2);
-            controller_keys.insert(KeyCode::BTN_MODE);
-            controller_keys.insert(KeyCode::BTN_DPAD_UP);
-            controller_keys.insert(KeyCode::BTN_DPAD_DOWN);
-            controller_keys.insert(KeyCode::BTN_DPAD_LEFT);
-            controller_keys.insert(KeyCode::BTN_DPAD_RIGHT);
+        match emulation {
+            EmulatedDevice::Xbox360 => {}
+            _ => {
+                controller_keys.insert(KeyCode::BTN_DPAD_UP);
+                controller_keys.insert(KeyCode::BTN_DPAD_DOWN);
+                controller_keys.insert(KeyCode::BTN_DPAD_LEFT);
+                controller_keys.insert(KeyCode::BTN_DPAD_RIGHT);
+
+                controller_keys.insert(KeyCode::BTN_MODE);
+
+                controller_keys.insert(KeyCode::BTN_TL2);
+                controller_keys.insert(KeyCode::BTN_TR2);
+            }
+        }
+        match emulation {
+            EmulatedDevice::XboxElite | EmulatedDevice::DualSenseEdge => {
+                controller_keys.insert(KeyCode(BTN_GRIPL));
+                controller_keys.insert(KeyCode(BTN_GRIPL2));
+                controller_keys.insert(KeyCode(BTN_GRIPR));
+                controller_keys.insert(KeyCode(BTN_GRIPR2));
+            }
+            _ => {}
         }
         // let mut cont_ff = AttributeSet::<FFEffectCode>::new();
         // cont_ff.insert(FFEffectCode::FF_RUMBLE);
         // cont_ff.insert(FFEffectCode::FF_GAIN);
 
         let controller = VirtualDevice::builder()?
-            .name(NAME)
-            .input_id(InputId::new(
-                BusType::BUS_USB,
-                VENDOR_ID,
-                if xinput_mode {
-                    PRODUCT_ID_XINPUT
-                } else {
-                    PRODUCT_ID
-                },
-                0x0110,
-            ))
+            .name(name)
+            .input_id(InputId::new(BusType::BUS_USB, vid, pid, 0x0110))
             .with_keys(&controller_keys)?
             .with_absolute_axis(&UinputAbsSetup::new(
                 AbsoluteAxisCode::ABS_HAT0X,
@@ -153,31 +377,60 @@ impl VirtualController {
             .with_absolute_axis(&UinputAbsSetup::new(
                 AbsoluteAxisCode::ABS_HAT0Y,
                 AbsInfo::new(0, HAT_UP, HAT_DOWN, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_X,
-                AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_Y,
-                AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_RX,
-                AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_RY,
-                AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_Z,
-                AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
-            ))?
-            .with_absolute_axis(&UinputAbsSetup::new(
-                AbsoluteAxisCode::ABS_RZ,
-                AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
-            ))?
+            ))?;
+        let controller = match emulation {
+            EmulatedDevice::DualShock4 => controller
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_X,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_Y,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_Z,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RZ,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RX,
+                    AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RY,
+                    AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
+                ))?,
+            _ => controller
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_X,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_Y,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RX,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RY,
+                    AbsInfo::new(0, STICK_MIN, STICK_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_Z,
+                    AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
+                ))?
+                .with_absolute_axis(&UinputAbsSetup::new(
+                    AbsoluteAxisCode::ABS_RZ,
+                    AbsInfo::new(0, 0, TRIGGER_MAX, 0, 0, 0),
+                ))?,
+        };
+        let controller = controller
             // .with_ff(&cont_ff)?
             // .with_ff_effects_max(FORCEFEEDBACK_MAX)
             .build()?;
@@ -186,6 +439,16 @@ impl VirtualController {
         mouse_keys.insert(KeyCode::BTN_LEFT);
         mouse_keys.insert(KeyCode::BTN_MIDDLE);
         mouse_keys.insert(KeyCode::BTN_RIGHT);
+        mouse_keys.insert(KeyCode::KEY_ENTER);
+        mouse_keys.insert(KeyCode::KEY_ESC);
+        mouse_keys.insert(KeyCode::KEY_LEFTCTRL);
+        mouse_keys.insert(KeyCode::KEY_LEFTSHIFT);
+        mouse_keys.insert(KeyCode::KEY_LEFTALT);
+        mouse_keys.insert(KeyCode::KEY_LEFTMETA);
+        mouse_keys.insert(KeyCode::KEY_UP);
+        mouse_keys.insert(KeyCode::KEY_DOWN);
+        mouse_keys.insert(KeyCode::KEY_LEFT);
+        mouse_keys.insert(KeyCode::KEY_RIGHT);
         let mut mouse_axes = AttributeSet::<RelativeAxisCode>::new();
         mouse_axes.insert(RelativeAxisCode::REL_X);
         mouse_axes.insert(RelativeAxisCode::REL_Y);
@@ -197,43 +460,13 @@ impl VirtualController {
             .with_relative_axes(&mouse_axes)?
             .build()?;
 
-        let force_feedback_events = Vec::new();
-        let left_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let right_trackpad_prev: Option<(f32, f32, f32)> = None;
-        let mouse_feedback: f32 = 0.0;
         Ok(Self {
-            xinput_mode,
+            emulation,
             controller,
             mouse,
-            force_feedback_events,
-            left_trackpad_prev,
-            right_trackpad_prev,
-            mouse_feedback,
+            force_feedback_events: vec![],
+            smooth_wheel_error: (0.0, 0.0),
         })
-    }
-
-    /// helper for digital inputs
-    fn perform_digital_input(
-        &mut self,
-        input: ControllerInput,
-        controller: &mut Vec<InputEvent>,
-        mouse: &mut Vec<InputEvent>,
-    ) {
-        if let Some((input, pressed)) = map_digital_controller_input(self.xinput_mode, input) {
-            controller.push(InputEvent::new(
-                EventType::KEY.0,
-                input.0,
-                if pressed { 1 } else { 0 },
-            ));
-        } else if let Some((input, pressed)) = map_digital_mouse_input(input) {
-            mouse.push(InputEvent::new(
-                EventType::KEY.0,
-                input.0,
-                if pressed { 1 } else { 0 },
-            ));
-        } else {
-            debug_println!("Ignoring input {input:?}");
-        };
     }
 }
 
@@ -242,219 +475,104 @@ impl AbstractVirtualController for VirtualController {
         let mut cevents = Vec::new();
         let mut mevents = Vec::new();
         match input {
-            ControllerInput::Left(pressed) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_HAT0X.0,
-                    if pressed { HAT_LEFT } else { HAT_NONE },
-                ));
-                if !self.xinput_mode {
-                    self.perform_digital_input(input, &mut cevents, &mut mevents);
+            ControllerInput::Up(_) => {
+                let (axis, value) = map_absolute_controller_input(self.emulation, input).unwrap();
+                cevents.push(InputEvent::new(EventType::ABSOLUTE.0, axis.0, value));
+                if let Some((input, pressed)) = map_digital_controller_input(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
                 }
             }
-            ControllerInput::Right(pressed) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_HAT0X.0,
-                    if pressed { HAT_RIGHT } else { HAT_NONE },
-                ));
-                if !self.xinput_mode {
-                    self.perform_digital_input(input, &mut cevents, &mut mevents);
+            ControllerInput::Down(_) => {
+                let (axis, value) = map_absolute_controller_input(self.emulation, input).unwrap();
+                cevents.push(InputEvent::new(EventType::ABSOLUTE.0, axis.0, value));
+                if let Some((input, pressed)) = map_digital_controller_input(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
                 }
             }
-            ControllerInput::Up(pressed) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_HAT0Y.0,
-                    if pressed { HAT_UP } else { HAT_NONE },
-                ));
-                if !self.xinput_mode {
-                    self.perform_digital_input(input, &mut cevents, &mut mevents);
+            ControllerInput::Left(_) => {
+                let (axis, value) = map_absolute_controller_input(self.emulation, input).unwrap();
+                cevents.push(InputEvent::new(EventType::ABSOLUTE.0, axis.0, value));
+                if let Some((input, pressed)) = map_digital_controller_input(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
                 }
             }
-            ControllerInput::Down(pressed) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_HAT0Y.0,
-                    if pressed { HAT_DOWN } else { HAT_NONE },
-                ));
-                if !self.xinput_mode {
-                    self.perform_digital_input(input, &mut cevents, &mut mevents);
+            ControllerInput::Right(_) => {
+                let (axis, value) = map_absolute_controller_input(self.emulation, input).unwrap();
+                cevents.push(InputEvent::new(EventType::ABSOLUTE.0, axis.0, value));
+                if let Some((input, pressed)) = map_digital_controller_input(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
                 }
             }
-            ControllerInput::LeftTrackpadTouch(_) => {
-                self.left_trackpad_prev = None;
-            }
-            ControllerInput::RightTrackpadTouch(_) => {
-                self.right_trackpad_prev = None;
-                self.mouse_feedback = 0.0;
-            }
-            ControllerInput::LeftTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.left_trackpad_prev {
-                    let x_diff = x - prev_x;
-                    let y_diff = y - prev_y;
-                    let _z_diff = z - prev_z;
 
-                    let x_out = (x_diff * WHEEL_SPEED) as i32;
-                    let y_out = (y_diff * WHEEL_SPEED) as i32;
-
-                    // Accumulate fractional output error
-                    let x_err = x_diff - (x_out as f32 / WHEEL_SPEED);
-                    let y_err = y_diff - (y_out as f32 / WHEEL_SPEED);
-                    self.left_trackpad_prev = Some((x - x_err, y - y_err, z));
-
-                    if x_out.abs() > 0 || y_out.abs() > 0 {
-                        self.force_feedback_events
-                            .push(ControllerOutput::Haptic(HapticEvent {
-                                pad: HapticSide::Left,
-                                duration: 0x000A,
-                                interval: 0x0000,
-                                count: 0x0001,
-                                gain: 0xff,
-                            }));
-                    }
-
-                    mevents.push(InputEvent::new(
-                        EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_HWHEEL_HI_RES.0,
-                        x_out * 120,
-                    ));
-                    mevents.push(InputEvent::new(
-                        EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_WHEEL_HI_RES.0,
-                        y_out * 120,
-                    ));
-                } else {
-                    self.left_trackpad_prev = Some((x, y, z));
-                }
-            }
-            ControllerInput::RightTrackpad(x, y, z) => {
-                if let Some((prev_x, prev_y, prev_z)) = self.right_trackpad_prev {
-                    let x_diff = x - prev_x;
-                    let y_diff = y - prev_y;
-                    let _z_diff = z - prev_z;
-
-                    let x_out = (x_diff * MOUSE_SPEED) as i32;
-                    let y_out = (y_diff * MOUSE_SPEED) as i32;
-
-                    // Accumulate fractional output error
-                    let x_err = x_diff - (x_out as f32 / MOUSE_SPEED);
-                    let y_err = y_diff - (y_out as f32 / MOUSE_SPEED);
-                    self.right_trackpad_prev = Some((x - x_err, y - y_err, z));
-
-                    let mouse_dist =
-                        ((x_out as f32 * x_out as f32) + (y_out as f32 * y_out as f32)).sqrt();
-                    self.mouse_feedback += mouse_dist;
-                    if self.mouse_feedback >= MOUSE_FEEDBACK_MAX {
-                        self.force_feedback_events
-                            .push(ControllerOutput::Haptic(HapticEvent {
-                                pad: HapticSide::Right,
-                                duration: 0x000A,
-                                interval: 0x0000,
-                                count: 0x0001,
-                                gain: 0xff,
-                            }));
-                        self.mouse_feedback %= MOUSE_FEEDBACK_MAX;
-                    }
-
-                    let y_out = y_out.neg();
-                    mevents.push(InputEvent::new(
-                        EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_X.0,
-                        x_out,
-                    ));
-                    mevents.push(InputEvent::new(
-                        EventType::RELATIVE.0,
-                        RelativeAxisCode::REL_Y.0,
-                        y_out,
-                    ));
-                } else {
-                    self.right_trackpad_prev = Some((x, y, z));
-                }
-            }
-            ControllerInput::RightTrackpadClick(pressed) => {
-                self.force_feedback_events
-                    .push(ControllerOutput::Haptic(HapticEvent {
-                        pad: HapticSide::Right,
-                        duration: 0x000A,
-                        interval: 0x0000,
-                        count: 0x0001,
-                        gain: 0xff,
-                    }));
+            ControllerInput::Wheel(x, y) => {
                 mevents.push(InputEvent::new(
-                    EventType::KEY.0,
-                    KeyCode::BTN_LEFT.0,
-                    if pressed { 1 } else { 0 },
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_HWHEEL_HI_RES.0,
+                    x * SMOOTH_WHEEL_MULTIPLIER,
                 ));
-                self.mouse_feedback = 0.0;
-                self.perform_digital_input(input, &mut cevents, &mut mevents);
-            }
-            ControllerInput::RightJoyStick(x, y) => {
-                let y = y.neg();
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_RX.0,
-                    if x.is_sign_positive() {
-                        x * STICK_MAX as f32
-                    } else {
-                        x.neg() * STICK_MIN as f32
-                    } as i32,
-                ));
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_RY.0,
-                    if y.is_sign_positive() {
-                        y * STICK_MAX as f32
-                    } else {
-                        y.neg() * STICK_MIN as f32
-                    } as i32,
+                mevents.push(InputEvent::new(
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_WHEEL_HI_RES.0,
+                    y * SMOOTH_WHEEL_MULTIPLIER,
                 ));
             }
-            ControllerInput::LeftJoyStick(x, y) => {
-                let y = y.neg();
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_X.0,
-                    if x.is_sign_positive() {
-                        x * STICK_MAX as f32
-                    } else {
-                        x.neg() * STICK_MIN as f32
-                    } as i32,
+            ControllerInput::SmoothWheel(x, y) => {
+                let x = x * (SMOOTH_WHEEL_MULTIPLIER as f32);
+                let y = y * (SMOOTH_WHEEL_MULTIPLIER as f32);
+
+                let x = x + self.smooth_wheel_error.0;
+                let x_out = x as i32;
+                self.smooth_wheel_error.0 = x - (x_out as f32);
+
+                let y = y + self.smooth_wheel_error.1;
+                let y_out = y as i32;
+                self.smooth_wheel_error.1 = y - (y_out as f32);
+
+                mevents.push(InputEvent::new(
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_HWHEEL_HI_RES.0,
+                    x_out,
                 ));
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_Y.0,
-                    if y.is_sign_positive() {
-                        y * STICK_MAX as f32
-                    } else {
-                        y.neg() * STICK_MIN as f32
-                    } as i32,
-                ));
-            }
-            ControllerInput::LeftTrigger(force) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_Z.0,
-                    if force.is_sign_positive() {
-                        force * TRIGGER_MAX as f32
-                    } else {
-                        0f32
-                    } as i32,
+                mevents.push(InputEvent::new(
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_WHEEL_HI_RES.0,
+                    y_out,
                 ));
             }
-            ControllerInput::RightTrigger(force) => {
-                cevents.push(InputEvent::new(
-                    EventType::ABSOLUTE.0,
-                    AbsoluteAxisCode::ABS_RZ.0,
-                    if force.is_sign_positive() {
-                        force * TRIGGER_MAX as f32
-                    } else {
-                        0f32
-                    } as i32,
+            ControllerInput::Mouse(x, y) => {
+                mevents.push(InputEvent::new(
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_X.0,
+                    x,
+                ));
+                mevents.push(InputEvent::new(
+                    EventType::RELATIVE.0,
+                    RelativeAxisCode::REL_Y.0,
+                    -y,
                 ));
             }
-            digital_input => {
-                self.perform_digital_input(digital_input, &mut cevents, &mut mevents);
+
+            _ => {
+                if let Some((axis, value)) = map_absolute_controller_input(self.emulation, input) {
+                    cevents.push(InputEvent::new(EventType::ABSOLUTE.0, axis.0, value));
+                } else if let Some(((x_axis, x_value), (y_axis, y_value))) =
+                    map_absolute_controller_input_2d(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::ABSOLUTE.0, x_axis.0, x_value));
+                    cevents.push(InputEvent::new(EventType::ABSOLUTE.0, y_axis.0, y_value));
+                } else if let Some((input, pressed)) =
+                    map_digital_controller_input(self.emulation, input)
+                {
+                    cevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
+                } else if let Some((input, pressed)) = map_digital_mouse_input(input) {
+                    mevents.push(InputEvent::new(EventType::KEY.0, input.0, pressed as i32));
+                } else {
+                    debug_println!("Ignoring input {input:?}");
+                };
             }
         }
         self.controller.emit(&cevents)?;

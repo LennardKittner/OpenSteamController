@@ -8,6 +8,8 @@ use dialog::{Choice, DialogBox};
 
 pub mod virtual_controller;
 
+pub mod layout;
+
 pub mod devices;
 
 pub mod multi_threading;
@@ -161,13 +163,13 @@ pub fn prompt_user_for_udev_rule() {
 
         (RuleState::RuleMatch(false), _) | (RuleState::RuleExists(true), _) => {
             handle_udev_rule_user_interaction(UDEV_RULE_PATH_USER,
-                &format!("Udev rules at {UDEV_RULE_PATH_USER} do not have the expected value. Do you want to recreate them?"), 
+                &format!("Udev rules at {UDEV_RULE_PATH_USER} do not have the expected value. Do you want to recreate them?"),
                 "Your controller may not be recognized without the correct udev rules.");
         }
         (RuleState::RuleExists(false), RuleState::RuleMatch(false))
         | (RuleState::RuleExists(false), RuleState::RuleExists(true)) => {
             handle_udev_rule_user_interaction(UDEV_RULE_PATH_SYSTEM,
-                &format!("Udev rules at {UDEV_RULE_PATH_SYSTEM} do not have the expected value. Do you want to recreate them?"), 
+                &format!("Udev rules at {UDEV_RULE_PATH_SYSTEM} do not have the expected value. Do you want to recreate them?"),
                 "Your controller may not be recognized without the correct udev rules.");
         }
 

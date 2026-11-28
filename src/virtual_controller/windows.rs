@@ -1,8 +1,27 @@
-use std::{ops::Neg, time::Duration};
+use std::{ops::Neg, str::FromStr, time::Duration};
 
 use vigem_client::{Client, Error, XButtons, XGamepad, Xbox360Wired};
 
 use crate::virtual_controller::{AbstractVirtualController, ControllerInput, ControllerOutput};
+
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub enum EmulatedDevice {
+    #[default]
+    Xbox360,
+}
+
+impl FromStr for EmulatedDevice {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "x360" => Ok(Self::Xbox360),
+            "xbox360" => Ok(Self::Xbox360),
+
+            _ => return Err("Unknow device name, expected 'x360', or 'xbox360'"),
+        }
+    }
+}
 
 /// A virtual controller to send button inputs
 pub struct VirtualController {
@@ -30,24 +49,33 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
     match input {
         ControllerInput::A(set) => bit_flag_helper(set, XButtons::A, current_buttons),
         ControllerInput::B(set) => bit_flag_helper(set, XButtons::B, current_buttons),
+        ControllerInput::C(_) => current_buttons,
         ControllerInput::X(set) => bit_flag_helper(set, XButtons::X, current_buttons),
         ControllerInput::Y(set) => bit_flag_helper(set, XButtons::Y, current_buttons),
-        ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
-        ControllerInput::RightBumper(set) => bit_flag_helper(set, XButtons::RB, current_buttons),
-        ControllerInput::Select(set) => bit_flag_helper(set, XButtons::BACK, current_buttons),
-        ControllerInput::Start(set) => bit_flag_helper(set, XButtons::START, current_buttons),
-        ControllerInput::Mode(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
-        ControllerInput::LeftThumb(set) => bit_flag_helper(set, XButtons::LTHUMB, current_buttons),
-        ControllerInput::RightThumb(set) => bit_flag_helper(set, XButtons::RTHUMB, current_buttons),
+        ControllerInput::Z(_) => current_buttons,
+
         ControllerInput::Up(set) => bit_flag_helper(set, XButtons::UP, current_buttons),
         ControllerInput::Down(set) => bit_flag_helper(set, XButtons::DOWN, current_buttons),
         ControllerInput::Left(set) => bit_flag_helper(set, XButtons::LEFT, current_buttons),
         ControllerInput::Right(set) => bit_flag_helper(set, XButtons::RIGHT, current_buttons),
-        ControllerInput::Menu(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
-        ControllerInput::Home(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
 
-        ControllerInput::Z(_) => current_buttons,
-        ControllerInput::C(_) => current_buttons,
+        ControllerInput::Start(set) => bit_flag_helper(set, XButtons::START, current_buttons),
+        ControllerInput::Select(set) => bit_flag_helper(set, XButtons::BACK, current_buttons),
+        ControllerInput::Mode(set) => bit_flag_helper(set, XButtons::GUIDE, current_buttons),
+        ControllerInput::Menu(_) => current_buttons,
+
+        ControllerInput::LeftBumper(set) => bit_flag_helper(set, XButtons::LB, current_buttons),
+        ControllerInput::LeftTriggerClick(_) => current_buttons,
+        ControllerInput::LeftThumb(set) => bit_flag_helper(set, XButtons::LTHUMB, current_buttons),
+        ControllerInput::LeftGrip1(_) => current_buttons,
+        ControllerInput::LeftGrip2(_) => current_buttons,
+
+        ControllerInput::RightBumper(set) => bit_flag_helper(set, XButtons::RB, current_buttons),
+        ControllerInput::RightTriggerClick(_) => current_buttons,
+        ControllerInput::RightThumb(set) => bit_flag_helper(set, XButtons::RTHUMB, current_buttons),
+        ControllerInput::RightGrip1(_) => current_buttons,
+        ControllerInput::RightGrip2(_) => current_buttons,
+
         input => {
             println!("Unknown or analog input {:?}", input);
             current_buttons
@@ -57,9 +85,7 @@ fn update_digital_buttons(current_buttons: u16, input: ControllerInput) -> u16 {
 
 impl VirtualController {
     /// create new virtual controller
-    /// The Windows backend always uses XInput, so the parameter is ignored.
-    /// It is kept to maintain the same interface as the Linux backend.
-    pub fn new(_xinput: bool) -> Result<VirtualController, Error> {
+    pub fn new(_emulated: EmulatedDevice) -> Result<VirtualController, Error> {
         let client = vigem_client::Client::connect().unwrap();
         let id = vigem_client::TargetId::XBOX360_WIRED;
         let mut device = vigem_client::Xbox360Wired::new(client, id);
@@ -77,12 +103,6 @@ impl VirtualController {
 impl AbstractVirtualController for VirtualController {
     fn send_input(&mut self, input: ControllerInput) -> anyhow::Result<()> {
         match input {
-            ControllerInput::LeftTrackpad(_, _, _) => {
-                return Ok(());
-            }
-            ControllerInput::RightTrackpad(_, _, _) => {
-                return Ok(());
-            }
             ControllerInput::RightJoyStick(x, y) => {
                 self.state.thumb_rx = if x.is_sign_positive() {
                     x * STICK_MAX as f32
@@ -120,6 +140,15 @@ impl AbstractVirtualController for VirtualController {
                 } else {
                     0f32
                 } as u8;
+            }
+            ControllerInput::Wheel(_, _) => {
+                return Ok(());
+            }
+            ControllerInput::SmoothWheel(_, _) => {
+                return Ok(());
+            }
+            ControllerInput::Mouse(_, _) => {
+                return Ok(());
             }
             digital_input => {
                 self.state.buttons = vigem_client::XButtons(update_digital_buttons(
