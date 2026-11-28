@@ -87,8 +87,13 @@ fn main() {
                     let local_exit = exit.clone();
                     (
                         std::thread::spawn(move || {
-                            // Windows always uses xinput mode
-                            controller_handler(true, device, device_rx, local_exit);
+                            // Windows always uses Xbox360 ("XInput mode")
+                            controller_handler(
+                                EmulatedDevice::Xbox360,
+                                device,
+                                device_rx,
+                                local_exit,
+                            );
                         }),
                         device_tx,
                     )
